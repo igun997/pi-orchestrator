@@ -3,15 +3,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseStartArgs } from "./args.js";
 import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.js";
 import { verifyTasks } from "./verifier.js";
-import { runPipeline } from "./pipeline.js";
-import { createExecutor } from "./executor.js";
+import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-
-const execAsync = promisify(exec);
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
   pi.registerCommand("orchestrator:start", {
@@ -21,9 +16,21 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const state = await createRun({ targetDir: ctx.cwd, ...parsed });
       ctx.ui.notify(renderStatus(state), "info");
 
-      // Kick off extract skill via LLM
+      // Kick LLM to run extract: pass images, ask for structured JSON, then Q-batch
       pi.sendUserMessage(
-        `Run /skill:orchestrator-extract on ${ctx.cwd}. Images staged: ${parsed.designSystemImage} and ${parsed.pageImage}. Extract specs, ask gap questions one at a time, then show confirm summary. After user confirms, tell me "confirmed" so I can run the pipeline.`,
+        [
+          `I've started an orchestrator run. Two images staged:`,
+          `- Design system: ${parsed.designSystemImage}`,
+          `- Page: ${parsed.pageImage}`,
+          ``,
+          `Please:`,
+          `1. Look at both images`,
+          `2. Extract design system tokens (colors in OKLCH, typography, spacing, components) → save to ${ctx.cwd}/.orchestrator/specs/design-system.json`,
+          `3. Extract page structure (sections with id, kind, order, content, components) → save to ${ctx.cwd}/.orchestrator/specs/page-spec.json`,
+          `4. Ask me gap-filling questions one at a time (product name, target users, tone, anti-references, register brand/product, backend need none/contact-form/auth/cms, domain)`,
+          `5. After all questions answered, show a confirmation summary and wait for me to say "confirm"`,
+          `6. When I confirm, run /orchestrator:confirm`
+        ].join("\n"),
         { deliverAs: "followUp" }
       );
     }
@@ -33,41 +40,56 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     description: "Confirm orchestrator plan and start seamless execution",
     handler: async (_args, ctx) => {
       const state = await loadState(ctx.cwd);
-      if (state.phase !== "confirming" && state.phase !== "questioning") {
-        ctx.ui.notify(`Cannot confirm in phase: ${state.phase}`, "error");
+      if (state.confirmed) {
+        ctx.ui.notify("Already confirmed. Use /orchestrator:resume to continue.", "info");
         return;
       }
 
       state.confirmed = true;
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
-      ctx.ui.notify("Confirmed. Starting seamless execution...", "info");
+      ctx.ui.notify("Confirmed. Starting seamless execution — no more prompts needed.", "info");
 
-      // Run pipeline
-      const executor = createExecutor({
-        targetDir: ctx.cwd,
-        shell: async (cmd, cwd) => {
-          const { stderr } = await execAsync(cmd, { cwd: cwd ?? ctx.cwd, timeout: 120_000 });
-          if (stderr && stderr.includes("ERR")) throw new Error(stderr.slice(0, 500));
-        }
-      });
+      // Advance pipeline — sends task prompts to LLM
+      const driver = {
+        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+      };
+      await advancePipeline(ctx.cwd, driver);
+    }
+  });
 
-      const result = await runPipeline({
-        targetDir: ctx.cwd,
-        executor,
-        onProgress: (s) => ctx.ui.notify(renderStatus(s), "info"),
-        dispatchDebug: state.config.autoHeal
-          ? async (prompt) => { pi.sendUserMessage(prompt, { deliverAs: "followUp" }); }
-          : undefined
-      });
-
-      if (result.phase === "done") {
-        const url = result.deployment?.url ?? "unknown";
-        ctx.ui.notify(`✅ Site deployed: ${url}`, "info");
-      } else {
-        const failed = result.tasks.filter((t) => t.status === "failed");
-        ctx.ui.notify(`❌ Pipeline stopped. Failed: ${failed.map((t) => t.id).join(", ")}`, "error");
+  pi.registerCommand("orchestrator:task-done", {
+    description: "Mark a pipeline task complete (called by LLM after executing task)",
+    handler: async (args, ctx) => {
+      const taskId = args?.trim();
+      if (!taskId) {
+        ctx.ui.notify("Usage: /orchestrator:task-done <task-id>", "error");
+        return;
       }
+      const driver = {
+        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+      };
+      await completeTask(ctx.cwd, taskId, driver);
+    }
+  });
+
+  pi.registerCommand("orchestrator:task-failed", {
+    description: "Mark a pipeline task failed (called by LLM on error)",
+    handler: async (args, ctx) => {
+      const parts = args?.trim().split(/\s+(.+)/) ?? [];
+      const taskId = parts[0];
+      const error = parts[1] ?? "unknown error";
+      if (!taskId) {
+        ctx.ui.notify("Usage: /orchestrator:task-failed <task-id> <error>", "error");
+        return;
+      }
+      const driver = {
+        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+      };
+      await failTask(ctx.cwd, taskId, error, driver);
     }
   });
 
@@ -99,37 +121,24 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         const state = await loadState(ctx.cwd);
         const fileExists = async (path: string) => existsSync(path);
         const verified = await verifyTasks(state.tasks, ctx.cwd, fileExists);
+
+        const invalidated = verified.filter((t, i) => state.tasks[i]?.status === "complete" && t.status === "pending");
         state.tasks = verified;
         await saveState(ctx.cwd, state);
 
-        const invalidated = verified.filter((t, i) => state.tasks[i]?.status === "complete" && t.status === "pending");
         if (invalidated.length > 0) {
           ctx.ui.notify(`Re-verified: ${invalidated.length} tasks reset to pending`, "info");
         }
 
         ctx.ui.notify(renderStatus(state), "info");
 
-        // If confirmed, resume pipeline
+        // If confirmed, advance pipeline
         if (state.confirmed && state.phase !== "done" && state.phase !== "failed") {
-          const executor = createExecutor({
-            targetDir: ctx.cwd,
-            shell: async (cmd, cwd) => {
-              const { stderr } = await execAsync(cmd, { cwd: cwd ?? ctx.cwd, timeout: 120_000 });
-              if (stderr && stderr.includes("ERR")) throw new Error(stderr.slice(0, 500));
-            }
-          });
-
-          const result = await runPipeline({
-            targetDir: ctx.cwd,
-            executor,
-            onProgress: (s) => ctx.ui.notify(renderStatus(s), "info")
-          });
-
-          if (result.phase === "done") {
-            ctx.ui.notify(`✅ Site deployed: ${result.deployment?.url ?? "unknown"}`, "info");
-          } else {
-            ctx.ui.notify(`Pipeline stopped. Run /orchestrator:status for details.`, "error");
-          }
+          const driver = {
+            sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+            notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+          };
+          await advancePipeline(ctx.cwd, driver);
         }
       } catch {
         ctx.ui.notify("No orchestrator run found. Use /orchestrator:start first.", "error");

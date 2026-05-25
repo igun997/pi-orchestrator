@@ -1,161 +1,134 @@
 import type { Task, RunState } from "@orchestrator/shared";
-import { loadState } from "@orchestrator/shared";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
-export interface ExecutorDeps {
-  targetDir: string;
-  shell: (cmd: string, cwd?: string) => Promise<void>;
-  mcpCall?: (server: string, tool: string, args: Record<string, unknown>) => Promise<unknown>;
-}
+/**
+ * Generates a prompt for the LLM to execute a given task.
+ * The LLM has access to mcp(), Bash, impeccable, and file tools.
+ */
+export function taskToPrompt(task: Task, state: RunState, targetDir: string): string {
+  const slug = slugFromState(state);
+  const projectDir = join(targetDir, slug);
+  const backend = (state.answers["backend-level"] as string) ?? "none";
 
-export function createExecutor(deps: ExecutorDeps): (task: Task) => Promise<void> {
-  return async (task: Task) => {
-    const state = await loadState(deps.targetDir);
+  switch (task.id) {
+    // === Scaffold ===
+    case "astro-init":
+      return `Scaffold an Astro project in ${projectDir}:
+\`\`\`bash
+pnpm create astro@latest ${slug} --template minimal --typescript strict --install --no-git --skip-houston
+cd ${projectDir}
+pnpm astro add cloudflare --yes
+pnpm astro add react --yes
+pnpm astro add tailwind --yes
+git init && git add -A && git commit -m "chore: scaffold"
+\`\`\`
+Run these commands. Report when done.`;
 
-    switch (task.id) {
-      // === Extract phase (handled by skill before seamless mode) ===
-      case "extract-design-system":
-      case "extract-page":
-      case "questions":
-      case "confirm":
-        // These are driven by the extract skill interactively, not by pipeline
-        return;
+    case "supabase-provision":
+      return `Use supabase MCP to create project "${slug}". Then apply schema for level "${backend}":
+- "contact-form": create table public.messages (id uuid primary key default gen_random_uuid(), name text, email text, message text, created_at timestamptz default now()) with RLS insert-only policy.
+- "auth": same + enable supabase auth + create profiles table with trigger.
+- "cms": same + pages, media tables + storage bucket.
+After schema applied, generate TypeScript types and save to ${projectDir}/src/types/db.ts.
+Set SUPABASE_URL and SUPABASE_ANON_KEY in ${projectDir}/.env.`;
 
-      // === Scaffold phase ===
-      case "astro-init":
-        await deps.shell(`pnpm create astro@latest ${slugFromState(state)} --template minimal --typescript strict --install --no-git --skip-houston`, deps.targetDir);
-        await deps.shell(`pnpm astro add cloudflare --yes`, projectDir(deps.targetDir, state));
-        await deps.shell(`pnpm astro add react --yes`, projectDir(deps.targetDir, state));
-        await deps.shell(`pnpm astro add tailwind --yes`, projectDir(deps.targetDir, state));
-        return;
+    case "shadcn-init":
+      return `In ${projectDir}, initialize shadcn:
+\`\`\`bash
+cd ${projectDir}
+pnpm dlx shadcn@latest init --yes
+\`\`\`
+Then use shadcn MCP to add components detected in .orchestrator/specs/design-system.json (map: Button→button, Card→card, TextInput→input, etc). Report when done.`;
 
-      case "supabase-provision":
-        if (deps.mcpCall) {
-          const slug = slugFromState(state);
-          await deps.mcpCall("supabase", "create_project", { name: slug });
-          const schemaLevel = (state.answers["backend-level"] as string) ?? "none";
-          if (schemaLevel !== "none") {
-            // Schema applied via MCP
-            await deps.mcpCall("supabase", "apply_schema", { project: slug, level: schemaLevel });
-          }
-        }
-        return;
+    case "write-context":
+      return `Read .orchestrator/specs/design-system.json and .orchestrator/specs/page-spec.json from ${targetDir}/.orchestrator/specs/. Also read .orchestrator/state.json answers.
+Write PRODUCT.md and DESIGN.md to ${projectDir}/ root matching impeccable's expected format:
+- PRODUCT.md: Product Name, register field, Users, Product Purpose, Tone, Anti-references
+- DESIGN.md: Colors (OKLCH), Typography, Spacing, Radii, Shadows, Components, Page sections
+Use the answers and specs to fill content. This is the handoff to impeccable.`;
 
-      case "shadcn-init":
-        await deps.shell(`pnpm dlx shadcn@latest init --yes`, projectDir(deps.targetDir, state));
-        // Add detected components
-        const components = (state.answers["shadcn-components"] as string[]) ?? [];
-        for (const comp of components) {
-          await deps.shell(`pnpm dlx shadcn@latest add ${comp} --yes`, projectDir(deps.targetDir, state));
-        }
-        return;
+    // === Build ===
+    case "impeccable-shape":
+      return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+npx impeccable shape "site layout"
+\`\`\`
+This plans the UX/UI before building. Report when done.`;
 
-      case "write-context":
-        await deps.shell(`pnpm --filter @orchestrator/context run extract -- ${deps.targetDir}`, deps.targetDir);
-        return;
+    case "assemble-page":
+      return `In ${projectDir}, create src/pages/index.astro that imports all crafted section components from src/components/ and renders them in order. Use the section order from .orchestrator/specs/page-spec.json.`;
 
-      // === Build phase ===
-      case "impeccable-shape":
-        await deps.shell(`npx impeccable shape "site layout"`, projectDir(deps.targetDir, state));
-        return;
+    case "wire-supabase":
+      return `In ${projectDir}, create src/lib/supabase.ts:
+\`\`\`typescript
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../types/db.js";
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+\`\`\`
+Wire it into any form/auth components that need it.`;
 
-      case "assemble-page":
-        // Handled programmatically by build skill
-        await deps.shell(`pnpm --filter @orchestrator/build run assemble -- ${deps.targetDir}`, deps.targetDir);
-        return;
+    case "polish":
+      return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+npx impeccable polish src/pages/index.astro
+\`\`\`
+Report when done.`;
 
-      case "wire-supabase":
-        await deps.shell(`pnpm --filter @orchestrator/build run wire-supabase -- ${deps.targetDir}`, deps.targetDir);
-        return;
+    case "audit":
+      return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+npx impeccable audit src/pages/index.astro
+\`\`\`
+If audit finds issues, fix them. Report when done.`;
 
-      case "polish":
-        await deps.shell(`npx impeccable polish src/pages/index.astro`, projectDir(deps.targetDir, state));
-        return;
+    // === Deploy ===
+    case "cf-build":
+      return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+pnpm build
+\`\`\`
+Verify dist/_worker.js exists. Report when done.`;
 
-      case "audit":
-        await deps.shell(`npx impeccable audit src/pages/index.astro`, projectDir(deps.targetDir, state));
-        return;
+    case "cf-worker-create":
+      return `Use cloudflare MCP to create a Worker named "${slug}". If it already exists, skip. Report when done.`;
 
-      // === Deploy phase ===
-      case "cf-build":
-        await deps.shell(`pnpm build`, projectDir(deps.targetDir, state));
-        return;
+    case "cf-secrets-push":
+      return `Use cloudflare MCP to push secrets to worker "${slug}":
+- Read SUPABASE_URL and SUPABASE_ANON_KEY from ${projectDir}/.env
+- Push each as a secret via MCP.
+Report when done.`;
 
-      case "cf-worker-create":
-        if (deps.mcpCall) {
-          await deps.mcpCall("cloudflare", "create_worker", { name: slugFromState(state) });
-        }
-        return;
+    case "cf-deploy":
+      return `Use cloudflare MCP to deploy worker "${slug}" from ${projectDir}/dist/. Report the deployment URL when done.`;
 
-      case "cf-secrets-push":
-        if (deps.mcpCall) {
-          const slug = slugFromState(state);
-          const secrets = extractSecrets(state);
-          for (const [key, value] of Object.entries(secrets)) {
-            await deps.mcpCall("cloudflare", "put_secret", { worker: slug, key, value });
-          }
-        }
-        return;
-
-      case "cf-deploy":
-        if (deps.mcpCall) {
-          const result = await deps.mcpCall("cloudflare", "deploy", {
-            name: slugFromState(state),
-            source: "dist/"
-          }) as { url?: string };
-          if (result?.url) {
-            const updated = await loadState(deps.targetDir);
-            updated.deployment = { url: result.url };
-            const { saveState } = await import("@orchestrator/shared");
-            await saveState(deps.targetDir, updated);
-          }
-        }
-        return;
-
-      case "cf-domain-attach":
-        if (deps.mcpCall) {
-          const domain = state.answers["domain"] as string;
-          if (domain && domain !== "workers.dev") {
-            await deps.mcpCall("cloudflare", "add_route", { pattern: domain, worker: slugFromState(state) });
-          }
-        }
-        return;
-
-      default:
-        // craft-{section} tasks
-        if (task.id.startsWith("craft-")) {
-          const sectionId = task.id.replace("craft-", "");
-          const section = findSection(state, sectionId);
-          await deps.shell(
-            `npx impeccable craft "${sectionId}: ${section?.kind ?? "section"}"`,
-            projectDir(deps.targetDir, state)
-          );
-          return;
-        }
-        throw new Error(`Unknown task: ${task.id}`);
+    case "cf-domain-attach": {
+      const domain = state.answers["domain"] as string;
+      return `Use cloudflare MCP to attach custom domain "${domain}" to worker "${slug}". Set up DNS route. Report when done.`;
     }
-  };
+
+    default:
+      // craft-{section} tasks
+      if (task.id.startsWith("craft-")) {
+        const sectionId = task.id.replace("craft-", "");
+        return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+npx impeccable craft "${sectionId}"
+\`\`\`
+This builds the ${sectionId} section component. Report when done.`;
+      }
+      return `Execute task "${task.id}": ${task.name}. Report when done.`;
+  }
 }
 
 function slugFromState(state: RunState): string {
   const name = (state.answers["product-name"] as string) ?? "site";
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "site";
-}
-
-function projectDir(targetDir: string, state: RunState): string {
-  return `${targetDir}/${slugFromState(state)}`;
-}
-
-function findSection(state: RunState, sectionId: string): { id: string; kind: string } | undefined {
-  // Section info stored in specs, but we just need the id/kind for the command
-  return { id: sectionId, kind: sectionId };
-}
-
-function extractSecrets(state: RunState): Record<string, string> {
-  const secrets: Record<string, string> = {};
-  if (state.stack && typeof state.stack === "object") {
-    const s = state.stack as Record<string, unknown>;
-    if (s["SUPABASE_URL"]) secrets["SUPABASE_URL"] = s["SUPABASE_URL"] as string;
-    if (s["SUPABASE_ANON_KEY"]) secrets["SUPABASE_ANON_KEY"] = s["SUPABASE_ANON_KEY"] as string;
-  }
-  return secrets;
 }
