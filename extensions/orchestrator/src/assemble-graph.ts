@@ -16,17 +16,20 @@ function task(id: string, name: string, deps: string[] = []): Task {
 
 function planScaffoldTasks(framework: "astro" | "static", backend: string): Task[] {
   if (framework === "static") {
-    // Static HTML — no Astro, no shadcn
-    const tasks = [task("write-context", "Write PRODUCT.md + DESIGN.md")];
+    // Static HTML + Tailwind
+    const tasks = [
+      task("static-init", "Initialize static project with Tailwind"),
+      task("write-context", "Write PRODUCT.md + DESIGN.md")
+    ];
     if (backend !== "none") {
       tasks.push(task("supabase-provision", "Provision Supabase backend"));
     }
     return tasks;
   }
 
-  // Astro + shadcn
+  // Astro + Tailwind + shadcn
   const tasks = [
-    task("astro-init", "Initialize Astro project"),
+    task("astro-init", "Initialize Astro project with Tailwind"),
     task("write-context", "Write PRODUCT.md + DESIGN.md"),
     task("shadcn-init", "Initialize shadcn/ui", ["astro-init"])
   ];

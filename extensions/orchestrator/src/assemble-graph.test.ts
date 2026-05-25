@@ -81,7 +81,7 @@ describe("assembleTaskGraph", () => {
     expect(cfBuild!.deps).toContain("audit");
   });
 
-  it("static framework skips astro-init and shadcn-init", () => {
+  it("static framework skips astro-init and shadcn-init but has static-init", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
       framework: "static",
@@ -93,6 +93,7 @@ describe("assembleTaskGraph", () => {
     const ids = tasks.map((t) => t.id);
     expect(ids).not.toContain("astro-init");
     expect(ids).not.toContain("shadcn-init");
+    expect(ids).toContain("static-init");
     expect(ids).toContain("write-context");
     expect(ids).toContain("impeccable-shape");
     expect(ids).toContain("cf-build");

@@ -122,9 +122,20 @@ Report when done.`;
 cd ${projectDir}
 npx impeccable craft "${sectionId}"
 \`\`\`
-This builds the ${sectionId} section component. Report when done.`;
+This builds the ${sectionId} section component. Use Tailwind CSS for all styling. Report when done.`;
       }
-      return `Execute task "${task.id}": ${task.name}. Report when done.`;
+      if (task.id === "static-init") {
+        return `Create a static HTML project in ${projectDir}:
+\`\`\`bash
+mkdir -p ${projectDir}/src ${projectDir}/public
+cd ${projectDir}
+pnpm init -y
+pnpm add -D tailwindcss @tailwindcss/cli
+npx tailwindcss init
+\`\`\`
+Create index.html in src/ with Tailwind CDN or build setup. Report when done.`;
+      }
+      return `Execute task "${task.id}": ${task.name}. Use Tailwind CSS for styling. Report when done.`;
   }
 }
 

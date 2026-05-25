@@ -89,11 +89,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       };
       await saveState(ctx.cwd, state);
 
-      // Kick LLM — minimal questions only (design/tone/branding from images)
+      // Kick LLM — minimal questions, then auto-confirm
       pi.sendUserMessage(
         [
           `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
           `Design system, colors, typography, tone, and branding already extracted from images — follow the reference exactly.`,
+          `Tailwind CSS is always used for styling.`,
           ``,
           `Only 4 questions needed. Ask one at a time, save each answer with /orchestrator:answer:`,
           `1. What language do you want me to use for this conversation? (English/Indonesian/etc) → save as: /orchestrator:answer language <value>`,
@@ -102,8 +103,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           `4. Deploy to workers.dev or custom domain? → save as: /orchestrator:answer domain <value>`,
           ``,
           `After each answer, run the /orchestrator:answer command to persist it.`,
-          `After all answered, show confirmation summary. When user confirms, run /orchestrator:confirm`,
-          `If user just says "go" or "confirm" without answering, use defaults (English, astro, none, workers.dev) and save them.`
+          `After ALL answers saved, immediately run /orchestrator:confirm — do NOT wait for user to say confirm.`,
+          `If user just says "go" without answering, use defaults (English, astro, none, workers.dev) and save+confirm.`
         ].join("\n"),
         { deliverAs: "followUp" }
       );
