@@ -1,0 +1,16 @@
+{
+  "name": "@orchestrator/context",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/write-context.js",
+  "types": "dist/write-context.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@orchestrator/shared": "workspace:*"
+  },
+  "devDependencies": {}
+}
