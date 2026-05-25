@@ -84,19 +84,29 @@ Use OKLCH for all colors (impeccable requirement). Write both files. Report when
 
     // === Build ===
     case "impeccable-shape":
-      return `In ${projectDir}, first load impeccable context:
-\`\`\`bash
-cd ${projectDir}
-node ${targetDir}/skills/impeccable/scripts/load-context.mjs
-\`\`\`
-Then run:
-\`\`\`bash
-npx impeccable shape "site layout based on page-spec.json sections"
-\`\`\`
-This plans the UX/UI before building. Report when done.`;
+      return `You are now acting as the impeccable design skill.
+Read the PRODUCT.md and DESIGN.md in ${projectDir}/.
+Read the page-spec from ${targetDir}/.orchestrator/specs/page-spec.json.
+
+Plan the UX/UI layout for the full site. For each section in the page spec:
+- Decide the layout approach (grid, flex, etc)
+- Choose which design tokens to apply
+- Plan component hierarchy
+- Note responsive breakpoints
+
+Write the shape plan to ${projectDir}/SHAPE.md with section-by-section breakdown.
+Use Tailwind CSS classes in your plan. Follow DESIGN.md colors/typography exactly.
+Report when done.`;
 
     case "assemble-page":
-      return `In ${projectDir}, create src/pages/index.astro that imports all crafted section components from src/components/ and renders them in order. Use the section order from .orchestrator/specs/page-spec.json.`;
+      return `Read all section HTML files from ${projectDir}/src/sections/ (in order from page-spec.json).
+Assemble them into ${projectDir}/src/index.html:
+- Keep the existing <head> with Tailwind CDN
+- Insert all sections in order inside <body>
+- Add smooth scroll behavior
+- Ensure consistent spacing between sections
+
+Write the complete assembled index.html. Report when done.`;
 
     case "wire-supabase":
       return `In ${projectDir}, create src/lib/supabase.ts:
@@ -110,20 +120,31 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 Wire it into any form/auth components that need it.`;
 
     case "polish":
-      return `In ${projectDir}, run impeccable polish for final quality pass:
-\`\`\`bash
-cd ${projectDir}
-npx impeccable polish src/pages/index.astro
-\`\`\`
-Fix any issues found. This is the final design refinement before audit. Report when done.`;
+      return `You are now acting as the impeccable polish skill.
+Read PRODUCT.md, DESIGN.md, and all HTML/component files in ${projectDir}/src/.
+
+Perform a final quality pass:
+- Check color consistency against DESIGN.md tokens
+- Verify typography scale matches spec
+- Ensure spacing rhythm is consistent
+- Fix any visual hierarchy issues
+- Improve micro-interactions (hover states, transitions)
+- Ensure all text is readable (contrast)
+- Add subtle polish (shadows, borders, transitions)
+
+Edit files directly. Use Tailwind CSS. Report changes made.`;
 
     case "audit":
-      return `In ${projectDir}, run impeccable audit for a11y + perf + responsive checks:
-\`\`\`bash
-cd ${projectDir}
-npx impeccable audit src/pages/index.astro
-\`\`\`
-Fix all issues found. This must pass before deploy. Report when done.`;
+      return `You are now acting as the impeccable audit skill.
+Read all HTML/component files in ${projectDir}/src/.
+
+Perform technical quality checks:
+- Accessibility: alt text, aria labels, focus states, color contrast, semantic HTML
+- Performance: image sizes, lazy loading, minimal JS
+- Responsive: test all breakpoints (mobile 640px, tablet 1024px, desktop)
+- SEO: meta tags, heading hierarchy, structured data
+
+Fix all issues found directly in the files. Report what was fixed.`;
 
     // === Deploy ===
     case "cf-build":
@@ -155,29 +176,35 @@ Report when done.`;
       // craft-{section} tasks
       if (task.id.startsWith("craft-")) {
         const sectionId = task.id.replace("craft-", "");
-        return `In ${projectDir}, run:
-\`\`\`bash
-cd ${projectDir}
-npx impeccable craft "${sectionId}"
-\`\`\`
-This builds the ${sectionId} section component. Use Tailwind CSS for all styling.
-For any images needed (hero backgrounds, avatars, illustrations), use picsum.photos with seeded URLs:
-- Hero/background: https://picsum.photos/seed/${sectionId}-bg/1920/1080?blur=2
-- Card images: https://picsum.photos/seed/${sectionId}-{n}/400/300
-- Avatars: https://picsum.photos/seed/${sectionId}-avatar-{n}/80/80
-Always use \`object-cover\` and include \`alt\` attributes.
-Report when done.`;
+        return `You are now acting as the impeccable craft skill.
+Read PRODUCT.md, DESIGN.md, and SHAPE.md in ${projectDir}/.
+Read the page-spec section "${sectionId}" from ${targetDir}/.orchestrator/specs/page-spec.json.
+
+Build the "${sectionId}" section as a complete HTML component in ${projectDir}/src/sections/${sectionId}.html.
+
+Requirements:
+- Use Tailwind CSS for ALL styling (reference DESIGN.md tokens)
+- Follow the layout plan from SHAPE.md for this section
+- Match colors, typography, spacing from DESIGN.md exactly
+- For images, use picsum.photos with seeded URLs:
+  - Backgrounds: https://picsum.photos/seed/${sectionId}-bg/1920/1080?blur=2
+  - Cards: https://picsum.photos/seed/${sectionId}-{n}/400/300
+  - Avatars: https://picsum.photos/seed/${sectionId}-avatar-{n}/80/80
+- Always use object-cover and include alt attributes
+- Make it responsive (mobile-first)
+- Use semantic HTML
+
+Write the complete section HTML. Report when done.`;
       }
       if (task.id === "static-init") {
         return `Create a static HTML project in ${projectDir}:
 \`\`\`bash
-mkdir -p ${projectDir}/src ${projectDir}/public
+mkdir -p ${projectDir}/src/sections ${projectDir}/public
 cd ${projectDir}
 pnpm init -y
-pnpm add -D tailwindcss @tailwindcss/cli
-npx tailwindcss init
 \`\`\`
-Create index.html in src/ with Tailwind CDN or build setup. Report when done.`;
+Create src/index.html with Tailwind CDN (script tag: https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4).
+Report when done.`;
       }
       return `Execute task "${task.id}": ${task.name}. Use Tailwind CSS for styling. Report when done.`;
   }
