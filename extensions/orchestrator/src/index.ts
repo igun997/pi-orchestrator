@@ -4,6 +4,7 @@ import { parseStartArgs } from "./args.js";
 import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.js";
 import { verifyTasks } from "./verifier.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
+import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -45,10 +46,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         return;
       }
 
+      // Assemble full task graph from answers + specs
+      const sections = await loadSectionsFromSpec(ctx.cwd);
+      const backend = (state.answers["backend-level"] as string) ?? "none";
+      const domain = (state.answers["domain"] as string) ?? "workers.dev";
+      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, backend, domain, sections });
       state.confirmed = true;
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
-      ctx.ui.notify("Confirmed. Starting seamless execution — no more prompts needed.", "info");
+      ctx.ui.notify(`Confirmed. ${state.tasks.length} tasks assembled. Starting seamless execution.`, "info");
 
       // Advance pipeline — sends task prompts to LLM
       const driver = {

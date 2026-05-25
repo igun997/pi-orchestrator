@@ -7,6 +7,7 @@ function task(id: string, name: string, deps: string[] = []): Task {
 export function planScaffoldTasks(backend: string): Task[] {
   const tasks = [
     task("astro-init", "Initialize Astro project"),
+    task("write-context", "Write PRODUCT.md + DESIGN.md"),
     task("shadcn-init", "Initialize shadcn/ui", ["astro-init"])
   ];
 
