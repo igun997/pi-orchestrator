@@ -21,17 +21,17 @@ Add to your pi MCP config (`~/.pi/mcp.json` or project `.pi/mcp.json`):
 ```json
 {
   "mcpServers": {
-    "cloudflare": {
-      "command": "npx",
-      "args": ["@cloudflare/mcp-server"]
-    },
     "shadcn": {
       "command": "npx",
-      "args": ["@shadcn/mcp-server"]
+      "args": ["shadcn@latest", "mcp"]
     },
     "supabase": {
       "command": "npx",
       "args": ["@supabase/mcp-server"]
+    },
+    "cloudflare": {
+      "command": "npx",
+      "args": ["@cloudflare/mcp-server"]
     }
   }
 }
