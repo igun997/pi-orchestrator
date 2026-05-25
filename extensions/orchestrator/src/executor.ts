@@ -160,7 +160,13 @@ Report when done.`;
 cd ${projectDir}
 npx impeccable craft "${sectionId}"
 \`\`\`
-This builds the ${sectionId} section component. Use Tailwind CSS for all styling. Report when done.`;
+This builds the ${sectionId} section component. Use Tailwind CSS for all styling.
+For any images needed (hero backgrounds, avatars, illustrations), use picsum.photos with seeded URLs:
+- Hero/background: https://picsum.photos/seed/${sectionId}-bg/1920/1080?blur=2
+- Card images: https://picsum.photos/seed/${sectionId}-{n}/400/300
+- Avatars: https://picsum.photos/seed/${sectionId}-avatar-{n}/80/80
+Always use \`object-cover\` and include \`alt\` attributes.
+Report when done.`;
       }
       if (task.id === "static-init") {
         return `Create a static HTML project in ${projectDir}:
