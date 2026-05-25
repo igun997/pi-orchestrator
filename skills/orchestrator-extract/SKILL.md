@@ -66,18 +66,15 @@ Rules:
 
 ### Phase 2: Ask gap-filling questions
 
-After saving both spec files, ask these questions **one at a time** (skip if already obvious from images):
+After saving both spec files, ask these questions **one at a time** (colors, typography, spacing, components already extracted — do NOT ask about those):
 
 1. Product name + short tagline?
 2. Target users in one sentence?
 3. Tone — 3 adjectives?
-4. Anti-references — sites/styles to avoid?
-5. Register — brand or product?
-6. Backend need — none / contact-form / auth / cms?
-7. Deploy to workers.dev or custom domain?
-8. (If only 1 section) Any pages beyond this one?
+4. Backend need — none / contact-form / auth / cms?
+5. Deploy to workers.dev or custom domain?
 
-Wait for each answer before asking next. Cap at 8 questions.
+Wait for each answer before asking next. Cap at 5 questions.
 
 ### Phase 3: Save answers to state
 

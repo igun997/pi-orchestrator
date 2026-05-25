@@ -89,19 +89,18 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       };
       await saveState(ctx.cwd, state);
 
-      // Kick LLM to ask gap-filling questions
+      // Kick LLM to ask gap-filling questions (skip design questions — already extracted from images)
       pi.sendUserMessage(
         [
           `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
+          `Design system colors, typography, spacing, and components already extracted from images — do NOT ask about those.`,
           ``,
-          `Now ask me gap-filling questions one at a time:`,
+          `Ask me these gap-filling questions one at a time:`,
           `1. Product name + short tagline?`,
           `2. Target users in one sentence?`,
           `3. Tone — 3 adjectives?`,
-          `4. Anti-references — sites/styles to avoid?`,
-          `5. Register — brand or product?`,
-          `6. Backend need — none / contact-form / auth / cms?`,
-          `7. Deploy to workers.dev or custom domain?`,
+          `4. Backend need — none / contact-form / auth / cms?`,
+          `5. Deploy to workers.dev or custom domain?`,
           ``,
           `After all answered, show confirmation summary. When I confirm, run /orchestrator:confirm`
         ].join("\n"),
