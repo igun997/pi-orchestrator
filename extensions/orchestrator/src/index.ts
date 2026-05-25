@@ -1,5 +1,6 @@
 import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { parseStartArgs } from "./args.js";
 import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.js";
 import { verifyTasks } from "./verifier.js";
@@ -96,21 +97,13 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           `Design system, colors, typography, tone, and branding already extracted from images — follow the reference exactly.`,
           `Tailwind CSS is always used for styling.`,
           ``,
-          `IMPORTANT: The commands below are pi extension commands (slash commands), NOT bash/shell commands.`,
-          `Call them as pi commands in the chat, not in a terminal.`,
+          `Only 4 questions needed. Ask one at a time. After each answer, use the orchestrator_answer tool to save it:`,
+          `1. What language do you want me to use for this conversation? (English/Indonesian/etc) → key: "language"`,
+          `2. Static HTML or framework (Astro + shadcn)? → key: "framework", value: "astro" or "static"`,
+          `3. Backend need — none / contact-form / auth / cms? → key: "backend-level"`,
+          `4. Deploy to workers.dev or custom domain? → key: "domain"`,
           ``,
-          `Only 4 questions needed. Ask one at a time, save each answer:`,
-          `1. What language do you want me to use for this conversation? (English/Indonesian/etc)`,
-          `   → then call pi command: /orchestrator:answer language <value>`,
-          `2. Static HTML or framework (Astro + shadcn)?`,
-          `   → then call pi command: /orchestrator:answer framework <value>`,
-          `3. Backend need — none / contact-form / auth / cms?`,
-          `   → then call pi command: /orchestrator:answer backend-level <value>`,
-          `4. Deploy to workers.dev or custom domain?`,
-          `   → then call pi command: /orchestrator:answer domain <value>`,
-          ``,
-          `After ALL answers saved, immediately call pi command: /orchestrator:confirm`,
-          `Do NOT run these in bash/shell. They are pi slash commands.`,
+          `After ALL answers saved via orchestrator_answer tool, call orchestrator_confirm tool to start the pipeline.`,
           `If user just says "go" without answering, use defaults (English, astro, none, workers.dev) and save+confirm.`
         ].join("\n"),
         { deliverAs: "followUp" }
@@ -119,7 +112,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("orchestrator:confirm", {
-    description: "Confirm orchestrator plan and start seamless execution",
+    description: "Confirm orchestrator plan and start seamless execution (manual trigger)",
     handler: async (_args, ctx) => {
       const state = await loadState(ctx.cwd);
       if (state.confirmed) {
@@ -127,7 +120,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // Assemble full task graph from answers + specs
       const sections = await loadSectionsFromSpec(ctx.cwd);
       const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
       const backend = (state.answers["backend-level"] as string) ?? "none";
@@ -138,7 +130,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       await saveState(ctx.cwd, state);
       ctx.ui.notify(`Confirmed. ${state.tasks.length} tasks assembled. Starting seamless execution.`, "info");
 
-      // Advance pipeline — sends task prompts to LLM
       const driver = {
         sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
         notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
@@ -147,53 +138,98 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     }
   });
 
-  pi.registerCommand("orchestrator:task-done", {
-    description: "Mark a pipeline task complete (called by LLM after executing task)",
-    handler: async (args, ctx) => {
-      const taskId = args?.trim();
-      if (!taskId) {
-        ctx.ui.notify("Usage: /orchestrator:task-done <task-id>", "error");
-        return;
-      }
-      const driver = {
-        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-      };
-      await completeTask(ctx.cwd, taskId, driver);
-    }
-  });
+  // === Tools (callable by LLM) ===
 
-  pi.registerCommand("orchestrator:answer", {
-    description: "Save user answer: /orchestrator:answer <key> <value>",
-    handler: async (args, ctx) => {
-      const match = (args ?? "").trim().match(/^(\S+)\s+(.+)$/);
-      if (!match) {
-        ctx.ui.notify("Usage: /orchestrator:answer <key> <value>\nKeys: language, framework, backend-level, domain", "error");
-        return;
-      }
-      const [, key, value] = match;
+  pi.registerTool({
+    name: "orchestrator_answer",
+    label: "Save Answer",
+    description: "Save a user answer to orchestrator state. Keys: language, framework, backend-level, domain",
+    parameters: Type.Object({
+      key: Type.String({ description: "Answer key: language, framework, backend-level, or domain" }),
+      value: Type.String({ description: "Answer value" })
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const state = await loadState(ctx.cwd);
-      state.answers[key!] = value!;
+      state.answers[params.key] = params.value;
       await saveState(ctx.cwd, state);
-      ctx.ui.notify(`✓ Saved: ${key} = ${value}`, "info");
+      return {
+        content: [{ type: "text", text: `✓ Saved: ${params.key} = ${params.value}` }],
+        details: {}
+      };
     }
   });
 
-  pi.registerCommand("orchestrator:task-failed", {
-    description: "Mark a pipeline task failed (called by LLM on error)",
-    handler: async (args, ctx) => {
-      const parts = args?.trim().split(/\s+(.+)/) ?? [];
-      const taskId = parts[0];
-      const error = parts[1] ?? "unknown error";
-      if (!taskId) {
-        ctx.ui.notify("Usage: /orchestrator:task-failed <task-id> <error>", "error");
-        return;
-      }
+  pi.registerTool({
+    name: "orchestrator_task_done",
+    label: "Task Done",
+    description: "Mark a pipeline task as complete after executing it",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID to mark complete" })
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const driver = {
         sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
         notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
       };
-      await failTask(ctx.cwd, taskId, error, driver);
+      await completeTask(ctx.cwd, params.taskId, driver);
+      return {
+        content: [{ type: "text", text: `✓ ${params.taskId} complete. Pipeline advancing.` }],
+        details: {}
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "orchestrator_task_failed",
+    label: "Task Failed",
+    description: "Mark a pipeline task as failed",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID that failed" }),
+      error: Type.String({ description: "Error message" })
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const driver = {
+        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+      };
+      await failTask(ctx.cwd, params.taskId, params.error, driver);
+      return {
+        content: [{ type: "text", text: `❌ ${params.taskId} failed: ${params.error}` }],
+        details: {}
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "orchestrator_confirm",
+    label: "Confirm",
+    description: "Confirm orchestrator plan and start seamless execution. Call after all answers are saved.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const state = await loadState(ctx.cwd);
+      if (state.confirmed) {
+        return { content: [{ type: "text", text: "Already confirmed. Use /orchestrator:resume." }], details: {} };
+      }
+
+      const sections = await loadSectionsFromSpec(ctx.cwd);
+      const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
+      const backend = (state.answers["backend-level"] as string) ?? "none";
+      const domain = (state.answers["domain"] as string) ?? "workers.dev";
+      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, framework, backend, domain, sections });
+      state.confirmed = true;
+      state.phase = "scaffolding";
+      await saveState(ctx.cwd, state);
+
+      const driver = {
+        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
+      };
+      await advancePipeline(ctx.cwd, driver);
+
+      return {
+        content: [{ type: "text", text: `✓ Confirmed. ${state.tasks.length} tasks assembled. Pipeline started.` }],
+        details: {}
+      };
     }
   });
 

@@ -26,6 +26,9 @@ importers:
       '@orchestrator/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      typebox:
+        specifier: ^1.1.38
+        version: 1.1.38
 
   packages/shared:
     dependencies:
@@ -695,6 +698,9 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
+  typebox@1.1.38:
+    resolution: {integrity: sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -1258,6 +1264,8 @@ snapshots:
       esbuild: 0.28.0
     optionalDependencies:
       fsevents: 2.3.3
+
+  typebox@1.1.38: {}
 
   typescript@5.9.3: {}
 
