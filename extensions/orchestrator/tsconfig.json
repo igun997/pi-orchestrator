@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@earendil-works/pi-coding-agent": [
+        "/home/nst/.nvm/versions/node/v22.20.0/lib/node_modules/@earendil-works/pi-coding-agent",
+        "/home/nst/.nvm/versions/node/v22.20.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
