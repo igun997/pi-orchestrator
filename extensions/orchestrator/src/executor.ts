@@ -42,18 +42,56 @@ pnpm dlx shadcn@latest init --yes
 Then use shadcn MCP to add components detected in .orchestrator/specs/design-system.json (map: Button→button, Card→card, TextInput→input, etc). Report when done.`;
 
     case "write-context":
-      return `Read .orchestrator/specs/design-system.json and .orchestrator/specs/page-spec.json from ${targetDir}/.orchestrator/specs/. Also read .orchestrator/state.json answers.
-Write PRODUCT.md and DESIGN.md to ${projectDir}/ root matching impeccable's expected format:
-- PRODUCT.md: Product Name, register field, Users, Product Purpose, Tone, Anti-references
-- DESIGN.md: Colors (OKLCH), Typography, Spacing, Radii, Shadows, Components, Page sections
-Use the answers and specs to fill content. This is the handoff to impeccable.`;
+      return `Read the extracted specs from ${targetDir}/.orchestrator/specs/design-system.json and ${targetDir}/.orchestrator/specs/page-spec.json.
+
+Generate two files in ${projectDir}/ root for impeccable:
+
+**PRODUCT.md** (required by impeccable):
+\`\`\`markdown
+# ${slug}
+
+## Register
+${state.answers["register"] ?? "product"}
+
+## Users
+${state.answers["target-users"] ?? "General users visiting the landing page"}
+
+## Product Purpose
+Landing page / marketing site based on provided design reference.
+
+## Tone
+Follow the reference images exactly. ${state.answers["tone"] ?? ""}
+
+## Anti-references
+Generic SaaS templates, stock illustrations, cookie-cutter layouts.
+
+## Strategic Principles
+- Follow the design system reference exactly
+- Match the page structure from the spec
+- Use Tailwind CSS for all styling
+\`\`\`
+
+**DESIGN.md** (strongly recommended by impeccable):
+Convert design-system.json into DESIGN.md format:
+- Colors: list all colors in OKLCH format (convert hex to oklch)
+- Typography: font families, scale, weights
+- Spacing: unit + scale
+- Radii, Shadows, Borders
+- Components: list with variants
+- Layout: from page-spec.json layout field
+
+Use OKLCH for all colors (impeccable requirement). Write both files. Report when done.`;
 
     // === Build ===
     case "impeccable-shape":
-      return `In ${projectDir}, run:
+      return `In ${projectDir}, first load impeccable context:
 \`\`\`bash
 cd ${projectDir}
-npx impeccable shape "site layout"
+node ${targetDir}/skills/impeccable/scripts/load-context.mjs
+\`\`\`
+Then run:
+\`\`\`bash
+npx impeccable shape "site layout based on page-spec.json sections"
 \`\`\`
 This plans the UX/UI before building. Report when done.`;
 
@@ -72,20 +110,20 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 Wire it into any form/auth components that need it.`;
 
     case "polish":
-      return `In ${projectDir}, run:
+      return `In ${projectDir}, run impeccable polish for final quality pass:
 \`\`\`bash
 cd ${projectDir}
 npx impeccable polish src/pages/index.astro
 \`\`\`
-Report when done.`;
+Fix any issues found. This is the final design refinement before audit. Report when done.`;
 
     case "audit":
-      return `In ${projectDir}, run:
+      return `In ${projectDir}, run impeccable audit for a11y + perf + responsive checks:
 \`\`\`bash
 cd ${projectDir}
 npx impeccable audit src/pages/index.astro
 \`\`\`
-If audit finds issues, fix them. Report when done.`;
+Fix all issues found. This must pass before deploy. Report when done.`;
 
     // === Deploy ===
     case "cf-build":
