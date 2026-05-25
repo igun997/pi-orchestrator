@@ -99,6 +99,7 @@ export async function callVision(
 /**
  * Load 9router config from environment.
  * Reads NINEROUTER_URL and NINEROUTER_KEY (same env vars pi uses).
+ * Model follows NINEROUTER_MODEL or defaults to kr/auto.
  */
 export function loadVisionConfig(): VisionClientConfig {
   const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
@@ -106,5 +107,6 @@ export function loadVisionConfig(): VisionClientConfig {
   if (!apiKey) {
     throw new Error("NINEROUTER_KEY not set. Ensure 9router is configured in pi.");
   }
-  return { baseUrl, apiKey, model: "kr/auto" };
+  const model = process.env.NINEROUTER_MODEL ?? process.env.PI_MODEL ?? "kr/auto";
+  return { baseUrl, apiKey, model };
 }
