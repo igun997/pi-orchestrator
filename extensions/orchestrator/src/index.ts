@@ -1,4 +1,4 @@
-import { loadState } from "@orchestrator/shared";
+import { REQUIRED_MCPS, findMissingMcps, loadState, renderMcpSnippet } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseStartArgs } from "./args.js";
 import { createRun, renderStatus } from "./runs.js";
@@ -18,6 +18,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const state = await loadState(ctx.cwd);
       ctx.ui.notify(renderStatus(state), "info");
+    }
+  });
+
+  pi.registerCommand("orchestrator:doctor", {
+    description: "Show required MCP bootstrap guidance",
+    handler: async (_args, ctx) => {
+      const missing = findMissingMcps([], REQUIRED_MCPS);
+      const message = [`Required MCPs: ${REQUIRED_MCPS.join(", ")}`, "", renderMcpSnippet(missing)].join("\n");
+      ctx.ui.notify(message, "info");
     }
   });
 
