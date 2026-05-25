@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 export interface AssemblyInputs {
   targetDir: string;
+  framework: "astro" | "static";
   backend: string;
   domain: string;
   sections: { id: string; kind: string }[];
@@ -13,7 +14,17 @@ function task(id: string, name: string, deps: string[] = []): Task {
   return { id, name, status: "pending", deps };
 }
 
-function planScaffoldTasks(backend: string): Task[] {
+function planScaffoldTasks(framework: "astro" | "static", backend: string): Task[] {
+  if (framework === "static") {
+    // Static HTML — no Astro, no shadcn
+    const tasks = [task("write-context", "Write PRODUCT.md + DESIGN.md")];
+    if (backend !== "none") {
+      tasks.push(task("supabase-provision", "Provision Supabase backend"));
+    }
+    return tasks;
+  }
+
+  // Astro + shadcn
   const tasks = [
     task("astro-init", "Initialize Astro project"),
     task("write-context", "Write PRODUCT.md + DESIGN.md"),
@@ -41,7 +52,7 @@ function planBuildTasks(sections: { id: string; kind: string }[]): Task[] {
 
 function planDeployTasks(domain?: string): Task[] {
   const tasks: Task[] = [
-    task("cf-build", "Build Astro site"),
+    task("cf-build", "Build site"),
     task("cf-worker-create", "Create CF Worker", ["cf-build"]),
     task("cf-secrets-push", "Push secrets", ["cf-worker-create"]),
     task("cf-deploy", "Deploy to CF", ["cf-secrets-push"])
@@ -54,10 +65,10 @@ function planDeployTasks(domain?: string): Task[] {
 
 /**
  * Assembles the full task graph from scaffold + build + deploy.
- * Called after confirm, replaces initial extract-only tasks with full pipeline.
+ * Called after confirm, uses answers to determine framework/backend/domain.
  */
 export function assembleTaskGraph(inputs: AssemblyInputs): Task[] {
-  const scaffoldTasks = planScaffoldTasks(inputs.backend);
+  const scaffoldTasks = planScaffoldTasks(inputs.framework, inputs.backend);
   const buildTasks = planBuildTasks(inputs.sections);
   const deployTasks = planDeployTasks(inputs.domain === "workers.dev" ? undefined : inputs.domain);
 
@@ -75,8 +86,8 @@ export function assembleTaskGraph(inputs: AssemblyInputs): Task[] {
     return t;
   });
 
-  // Wire supabase client if needed
-  const wireTask: Task[] = inputs.backend !== "none"
+  // Wire supabase client if needed (only for astro)
+  const wireTask: Task[] = inputs.backend !== "none" && inputs.framework === "astro"
     ? [task("wire-supabase", "Wire Supabase client", ["supabase-provision", "astro-init"])]
     : [];
 

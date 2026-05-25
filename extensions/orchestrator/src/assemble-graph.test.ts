@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { assembleTaskGraph } from "./assemble-graph.js";
 
 describe("assembleTaskGraph", () => {
-  it("assembles full graph with supabase when backend is contact-form", () => {
+  it("assembles full graph with supabase when backend is contact-form (astro)", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
+      framework: "astro",
       backend: "contact-form",
       domain: "workers.dev",
       sections: [{ id: "hero", kind: "hero" }, { id: "pricing", kind: "pricing" }]
@@ -30,6 +31,7 @@ describe("assembleTaskGraph", () => {
   it("skips supabase when backend is none", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
+      framework: "astro",
       backend: "none",
       domain: "workers.dev",
       sections: [{ id: "hero", kind: "hero" }]
@@ -43,6 +45,7 @@ describe("assembleTaskGraph", () => {
   it("adds domain-attach for custom domain", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
+      framework: "astro",
       backend: "none",
       domain: "example.com",
       sections: [{ id: "hero", kind: "hero" }]
@@ -54,6 +57,7 @@ describe("assembleTaskGraph", () => {
   it("build tasks depend on scaffold tasks", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
+      framework: "astro",
       backend: "none",
       domain: "workers.dev",
       sections: [{ id: "hero", kind: "hero" }]
@@ -67,6 +71,7 @@ describe("assembleTaskGraph", () => {
   it("deploy depends on audit", () => {
     const tasks = assembleTaskGraph({
       targetDir: "/tmp/site",
+      framework: "astro",
       backend: "none",
       domain: "workers.dev",
       sections: [{ id: "hero", kind: "hero" }]
@@ -74,5 +79,36 @@ describe("assembleTaskGraph", () => {
 
     const cfBuild = tasks.find((t) => t.id === "cf-build");
     expect(cfBuild!.deps).toContain("audit");
+  });
+
+  it("static framework skips astro-init and shadcn-init", () => {
+    const tasks = assembleTaskGraph({
+      targetDir: "/tmp/site",
+      framework: "static",
+      backend: "none",
+      domain: "workers.dev",
+      sections: [{ id: "hero", kind: "hero" }]
+    });
+
+    const ids = tasks.map((t) => t.id);
+    expect(ids).not.toContain("astro-init");
+    expect(ids).not.toContain("shadcn-init");
+    expect(ids).toContain("write-context");
+    expect(ids).toContain("impeccable-shape");
+    expect(ids).toContain("cf-build");
+  });
+
+  it("static with backend has no wire-supabase", () => {
+    const tasks = assembleTaskGraph({
+      targetDir: "/tmp/site",
+      framework: "static",
+      backend: "contact-form",
+      domain: "workers.dev",
+      sections: [{ id: "hero", kind: "hero" }]
+    });
+
+    const ids = tasks.map((t) => t.id);
+    expect(ids).toContain("supabase-provision");
+    expect(ids).not.toContain("wire-supabase");
   });
 });

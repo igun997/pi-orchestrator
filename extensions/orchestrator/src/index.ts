@@ -95,14 +95,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
           `Design system, colors, typography, tone, and branding already extracted from images — follow the reference exactly.`,
           ``,
-          `Only 4 questions needed:`,
-          `1. What language do you want me to use for this conversation? (English/Indonesian/etc)`,
-          `2. Static HTML or framework (Astro + shadcn)? [default: Astro + shadcn]`,
-          `3. Backend need — none / contact-form / auth / cms? [default: none]`,
-          `4. Deploy to workers.dev or custom domain? [default: workers.dev]`,
+          `Only 4 questions needed. Ask one at a time, save each answer with /orchestrator:answer:`,
+          `1. What language do you want me to use for this conversation? (English/Indonesian/etc) → save as: /orchestrator:answer language <value>`,
+          `2. Static HTML or framework (Astro + shadcn)? → save as: /orchestrator:answer framework <value>`,
+          `3. Backend need — none / contact-form / auth / cms? → save as: /orchestrator:answer backend-level <value>`,
+          `4. Deploy to workers.dev or custom domain? → save as: /orchestrator:answer domain <value>`,
           ``,
-          `After answered, show confirmation summary. When I confirm, run /orchestrator:confirm`,
-          `If user just says "go" or "confirm" without answering, use defaults (English, Astro+shadcn, none, workers.dev).`
+          `After each answer, run the /orchestrator:answer command to persist it.`,
+          `After all answered, show confirmation summary. When user confirms, run /orchestrator:confirm`,
+          `If user just says "go" or "confirm" without answering, use defaults (English, astro, none, workers.dev) and save them.`
         ].join("\n"),
         { deliverAs: "followUp" }
       );
@@ -120,9 +121,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
       // Assemble full task graph from answers + specs
       const sections = await loadSectionsFromSpec(ctx.cwd);
+      const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
       const backend = (state.answers["backend-level"] as string) ?? "none";
       const domain = (state.answers["domain"] as string) ?? "workers.dev";
-      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, backend, domain, sections });
+      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, framework, backend, domain, sections });
       state.confirmed = true;
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
@@ -150,6 +152,22 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
       };
       await completeTask(ctx.cwd, taskId, driver);
+    }
+  });
+
+  pi.registerCommand("orchestrator:answer", {
+    description: "Save user answer: /orchestrator:answer <key> <value>",
+    handler: async (args, ctx) => {
+      const match = (args ?? "").trim().match(/^(\S+)\s+(.+)$/);
+      if (!match) {
+        ctx.ui.notify("Usage: /orchestrator:answer <key> <value>\nKeys: language, framework, backend-level, domain", "error");
+        return;
+      }
+      const [, key, value] = match;
+      const state = await loadState(ctx.cwd);
+      state.answers[key!] = value!;
+      await saveState(ctx.cwd, state);
+      ctx.ui.notify(`✓ Saved: ${key} = ${value}`, "info");
     }
   });
 
