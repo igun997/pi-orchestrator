@@ -66,15 +66,13 @@ Rules:
 
 ### Phase 2: Ask gap-filling questions
 
-After saving both spec files, ask these questions **one at a time** (colors, typography, spacing, components already extracted — do NOT ask about those):
+After saving both spec files, ask only these questions (design, tone, branding all come from images — follow the reference exactly):
 
-1. Product name + short tagline?
-2. Target users in one sentence?
-3. Tone — 3 adjectives?
-4. Backend need — none / contact-form / auth / cms?
-5. Deploy to workers.dev or custom domain?
+1. Static HTML or framework (Astro + shadcn)? [default: Astro + shadcn]
+2. Backend need — none / contact-form / auth / cms? [default: none]
+3. Deploy to workers.dev or custom domain? [default: workers.dev]
 
-Wait for each answer before asking next. Cap at 5 questions.
+If user says "go" or "confirm" without answering, use defaults.
 
 ### Phase 3: Save answers to state
 
