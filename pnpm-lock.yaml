@@ -45,6 +45,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
 
+  skills/orchestrator-deploy:
+    dependencies:
+      '@orchestrator/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
   skills/orchestrator-extract:
     dependencies:
       '@orchestrator/shared':
