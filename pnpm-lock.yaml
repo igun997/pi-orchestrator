@@ -33,6 +33,12 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
 
+  skills/orchestrator-build:
+    dependencies:
+      '@orchestrator/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
   skills/orchestrator-context:
     dependencies:
       '@orchestrator/shared':
@@ -40,6 +46,12 @@ importers:
         version: link:../../packages/shared
 
   skills/orchestrator-extract:
+    dependencies:
+      '@orchestrator/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
+  skills/orchestrator-scaffold:
     dependencies:
       '@orchestrator/shared':
         specifier: workspace:*
