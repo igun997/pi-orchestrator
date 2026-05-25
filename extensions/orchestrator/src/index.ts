@@ -95,13 +95,14 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
           `Design system, colors, typography, tone, and branding already extracted from images — follow the reference exactly.`,
           ``,
-          `Only 3 questions needed:`,
-          `1. Static HTML or framework (Astro + shadcn)? [default: Astro + shadcn]`,
-          `2. Backend need — none / contact-form / auth / cms? [default: none]`,
-          `3. Deploy to workers.dev or custom domain? [default: workers.dev]`,
+          `Only 4 questions needed:`,
+          `1. What language do you want me to use for this conversation? (English/Indonesian/etc)`,
+          `2. Static HTML or framework (Astro + shadcn)? [default: Astro + shadcn]`,
+          `3. Backend need — none / contact-form / auth / cms? [default: none]`,
+          `4. Deploy to workers.dev or custom domain? [default: workers.dev]`,
           ``,
           `After answered, show confirmation summary. When I confirm, run /orchestrator:confirm`,
-          `If user just says "go" or "confirm" without answering, use defaults.`
+          `If user just says "go" or "confirm" without answering, use defaults (English, Astro+shadcn, none, workers.dev).`
         ].join("\n"),
         { deliverAs: "followUp" }
       );
