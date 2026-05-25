@@ -5,7 +5,9 @@ import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.j
 import { verifyTasks } from "./verifier.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
+import { callVision, loadVisionConfig } from "./vision-client.js";
 import { existsSync } from "node:fs";
+import { writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -193,6 +195,112 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const updated = retryTask(state, taskId);
       await saveState(ctx.cwd, updated);
       ctx.ui.notify(`Task ${taskId} reset to pending. Run /orchestrator:resume to continue.`, "info");
+    }
+  });
+
+  // === Vision via 9router ===
+
+  pi.registerCommand("orchestrator:vision", {
+    description: "Extract specs from images via 9router vision: /orchestrator:vision <image1> [image2]",
+    handler: async (args, ctx) => {
+      const images = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      if (images.length === 0) {
+        ctx.ui.notify("Usage: /orchestrator:vision <image1> [image2]", "error");
+        return;
+      }
+
+      let config;
+      try {
+        config = loadVisionConfig();
+      } catch (e: any) {
+        ctx.ui.notify(`Vision config error: ${e.message}`, "error");
+        return;
+      }
+
+      const resolvedImages = images.map((img) => img.startsWith("/") ? img : join(ctx.cwd, img));
+      ctx.ui.notify(`Analyzing ${resolvedImages.length} image(s) via 9router...`, "info");
+
+      try {
+        // Extract design system
+        const dsResult = await callVision(config, resolvedImages.slice(0, 1), [
+          "Extract the design system from this image as JSON.",
+          "Include: colors (hex), typography (fontFamilies, scale with size/line-height, weights),",
+          "spacing (unit + scale), radii, shadows, borders, components (name, variants, states).",
+          "Output ONLY valid JSON, no markdown fences."
+        ].join(" "));
+
+        const specsDir = join(ctx.cwd, ".orchestrator/specs");
+        await mkdir(specsDir, { recursive: true });
+
+        // Try parse JSON, fallback to raw
+        let dsJson: string;
+        try {
+          const parsed = JSON.parse(dsResult.content.replace(/^```json?\n?|```$/g, "").trim());
+          dsJson = JSON.stringify(parsed, null, 2);
+        } catch {
+          dsJson = dsResult.content;
+        }
+        await writeFile(join(specsDir, "design-system.json"), dsJson);
+        ctx.ui.notify(`✓ Design system extracted (${dsResult.usage?.completionTokens ?? "?"} tokens)`, "info");
+
+        // Extract page spec if second image provided
+        if (resolvedImages.length > 1) {
+          const pageResult = await callVision(config, resolvedImages.slice(1, 2), [
+            "Extract the page structure from this image as JSON.",
+            "Format: { meta: { inferredPageType }, layout: { grid, breakpoints, container },",
+            "sections: [{ id (kebab-case), kind, order (0-indexed), content: { headline, ... },",
+            "components: [...], notes: [...] }] }.",
+            "Output ONLY valid JSON, no markdown fences."
+          ].join(" "));
+
+          let pageJson: string;
+          try {
+            const parsed = JSON.parse(pageResult.content.replace(/^```json?\n?|```$/g, "").trim());
+            pageJson = JSON.stringify(parsed, null, 2);
+          } catch {
+            pageJson = pageResult.content;
+          }
+          await writeFile(join(specsDir, "page-spec.json"), pageJson);
+          ctx.ui.notify(`✓ Page spec extracted (${pageResult.usage?.completionTokens ?? "?"} tokens)`, "info");
+        }
+
+        ctx.ui.notify("Vision extraction complete. Specs saved to .orchestrator/specs/", "info");
+      } catch (e: any) {
+        ctx.ui.notify(`Vision error: ${e.message}`, "error");
+      }
+    }
+  });
+
+  pi.registerCommand("orchestrator:vision-describe", {
+    description: "Describe an image via 9router vision: /orchestrator:vision-describe <image> [prompt]",
+    handler: async (args, ctx) => {
+      const parts = (args ?? "").trim().split(/\s+/);
+      const imagePath = parts[0];
+      const prompt = parts.slice(1).join(" ") || "Describe this image in detail.";
+
+      if (!imagePath) {
+        ctx.ui.notify("Usage: /orchestrator:vision-describe <image> [prompt]", "error");
+        return;
+      }
+
+      let config;
+      try {
+        config = loadVisionConfig();
+      } catch (e: any) {
+        ctx.ui.notify(`Vision config error: ${e.message}`, "error");
+        return;
+      }
+
+      const resolved = imagePath.startsWith("/") ? imagePath : join(ctx.cwd, imagePath);
+      ctx.ui.notify(`Analyzing image via 9router...`, "info");
+
+      try {
+        const result = await callVision(config, [resolved], prompt);
+        // Send result as message so LLM can use it
+        pi.sendUserMessage(`[Vision result for ${imagePath}]\n\n${result.content}`, { deliverAs: "followUp" });
+      } catch (e: any) {
+        ctx.ui.notify(`Vision error: ${e.message}`, "error");
+      }
     }
   });
 }
