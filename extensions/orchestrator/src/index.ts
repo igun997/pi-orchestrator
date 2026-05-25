@@ -19,20 +19,91 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const state = await createRun({ targetDir: ctx.cwd, ...parsed });
       ctx.ui.notify(renderStatus(state), "info");
 
-      // Kick LLM to run extract: pass images, ask for structured JSON, then Q-batch
+      // === Vision extraction via 9router ===
+      let config;
+      try {
+        config = loadVisionConfig();
+      } catch (e: any) {
+        ctx.ui.notify(`Vision config error: ${e.message}. Set NINEROUTER_URL + NINEROUTER_API_KEY.`, "error");
+        return;
+      }
+
+      const dsImage = parsed.designSystemImage.startsWith("/") ? parsed.designSystemImage : join(ctx.cwd, parsed.designSystemImage);
+      const pageImage = parsed.pageImage.startsWith("/") ? parsed.pageImage : join(ctx.cwd, parsed.pageImage);
+
+      const specsDir = join(ctx.cwd, ".orchestrator/specs");
+      await mkdir(specsDir, { recursive: true });
+
+      ctx.ui.notify("Extracting design system from image...", "info");
+      try {
+        const dsResult = await callVision(config, [dsImage], [
+          "Extract the design system from this image as JSON.",
+          "Include: colors (hex), typography (fontFamilies, scale with size/line-height, weights),",
+          "spacing (unit + scale), radii, shadows, borders, components (name, variants, states).",
+          "Output ONLY valid JSON, no markdown fences."
+        ].join(" "));
+
+        let dsJson: string;
+        try {
+          const parsed = JSON.parse(dsResult.content.replace(/^```json?\n?|```$/g, "").trim());
+          dsJson = JSON.stringify(parsed, null, 2);
+        } catch {
+          dsJson = dsResult.content;
+        }
+        await writeFile(join(specsDir, "design-system.json"), dsJson);
+        ctx.ui.notify(`✓ Design system extracted (${dsResult.usage?.completionTokens ?? "?"} tokens)`, "info");
+      } catch (e: any) {
+        ctx.ui.notify(`Design system extraction failed: ${e.message}`, "error");
+        return;
+      }
+
+      ctx.ui.notify("Extracting page structure from image...", "info");
+      try {
+        const pageResult = await callVision(config, [pageImage], [
+          "Extract the page structure from this image as JSON.",
+          "Format: { meta: { inferredPageType }, layout: { grid, breakpoints, container },",
+          "sections: [{ id (kebab-case), kind, order (0-indexed), content: { headline, ... },",
+          "components: [...], notes: [...] }] }.",
+          "Output ONLY valid JSON, no markdown fences."
+        ].join(" "));
+
+        let pageJson: string;
+        try {
+          const parsed = JSON.parse(pageResult.content.replace(/^```json?\n?|```$/g, "").trim());
+          pageJson = JSON.stringify(parsed, null, 2);
+        } catch {
+          pageJson = pageResult.content;
+        }
+        await writeFile(join(specsDir, "page-spec.json"), pageJson);
+        ctx.ui.notify(`✓ Page spec extracted (${pageResult.usage?.completionTokens ?? "?"} tokens)`, "info");
+      } catch (e: any) {
+        ctx.ui.notify(`Page extraction failed: ${e.message}`, "error");
+        return;
+      }
+
+      // Update state
+      state.phase = "questioning";
+      state.specs = {
+        designSystem: ".orchestrator/specs/design-system.json",
+        page: ".orchestrator/specs/page-spec.json"
+      };
+      await saveState(ctx.cwd, state);
+
+      // Kick LLM to ask gap-filling questions
       pi.sendUserMessage(
         [
-          `I've started an orchestrator run. Two images staged:`,
-          `- Design system: ${parsed.designSystemImage}`,
-          `- Page: ${parsed.pageImage}`,
+          `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
           ``,
-          `Please:`,
-          `1. Look at both images`,
-          `2. Extract design system tokens (colors in OKLCH, typography, spacing, components) → save to ${ctx.cwd}/.orchestrator/specs/design-system.json`,
-          `3. Extract page structure (sections with id, kind, order, content, components) → save to ${ctx.cwd}/.orchestrator/specs/page-spec.json`,
-          `4. Ask me gap-filling questions one at a time (product name, target users, tone, anti-references, register brand/product, backend need none/contact-form/auth/cms, domain)`,
-          `5. After all questions answered, show a confirmation summary and wait for me to say "confirm"`,
-          `6. When I confirm, run /orchestrator:confirm`
+          `Now ask me gap-filling questions one at a time:`,
+          `1. Product name + short tagline?`,
+          `2. Target users in one sentence?`,
+          `3. Tone — 3 adjectives?`,
+          `4. Anti-references — sites/styles to avoid?`,
+          `5. Register — brand or product?`,
+          `6. Backend need — none / contact-form / auth / cms?`,
+          `7. Deploy to workers.dev or custom domain?`,
+          ``,
+          `After all answered, show confirmation summary. When I confirm, run /orchestrator:confirm`
         ].join("\n"),
         { deliverAs: "followUp" }
       );
