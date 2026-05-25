@@ -1,19 +1,23 @@
+import { loadState } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseStartArgs } from "./args.js";
+import { createRun, renderStatus } from "./runs.js";
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
   pi.registerCommand("orchestrator:start", {
     description: "Start image-to-site orchestration: /orchestrator:start [--auto-heal] [--tui] <ds-img> <page-img>",
     handler: async (args, ctx) => {
       const parsed = parseStartArgs(args ?? "");
-      ctx.ui.notify(`Starting orchestrator for ${parsed.designSystemImage} + ${parsed.pageImage}`, "info");
+      const state = await createRun({ targetDir: ctx.cwd, ...parsed });
+      ctx.ui.notify(renderStatus(state), "info");
     }
   });
 
   pi.registerCommand("orchestrator:status", {
     description: "Show orchestrator status",
     handler: async (_args, ctx) => {
-      ctx.ui.notify("No run loaded", "info");
+      const state = await loadState(ctx.cwd);
+      ctx.ui.notify(renderStatus(state), "info");
     }
   });
 
