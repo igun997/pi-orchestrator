@@ -330,7 +330,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       // OpenAI-compatible / 9router — use vision API endpoint
       const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
       const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
-      const modelId = process.env.NINEROUTER_MODEL ?? process.env.PI_MODEL ?? "kr/auto";
+      const modelId = model?.id ?? process.env.PI_MODEL ?? "kr/auto";
 
       if (!apiKey) {
         // No 9router key and non-native provider — return image anyway, hope for the best
