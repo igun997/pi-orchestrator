@@ -11,6 +11,32 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, extname } from "node:path";
 
+interface VisionConfig {
+  provider?: string;
+  modelId?: string;
+}
+
+/**
+ * Load vision config: per-project (.orchestrator/vision.json) > global (~/.pi/orchestrator/vision.json) > undefined
+ */
+async function loadVisionConfig(cwd: string): Promise<VisionConfig> {
+  // Per-project
+  const projectPath = join(cwd, ".orchestrator/vision.json");
+  if (existsSync(projectPath)) {
+    try {
+      return JSON.parse(await readFile(projectPath, "utf8"));
+    } catch { /* ignore parse errors */ }
+  }
+  // Global
+  const globalPath = join(homedir(), ".pi/orchestrator/vision.json");
+  if (existsSync(globalPath)) {
+    try {
+      return JSON.parse(await readFile(globalPath, "utf8"));
+    } catch { /* ignore parse errors */ }
+  }
+  return {};
+}
+
 export default function orchestratorExtension(pi: ExtensionAPI) {
   pi.registerCommand("orchestrator:start", {
     description: "Start image-to-site orchestration: /orchestrator:start [--auto-heal] [--tui] <ds-img> <page-img>",
@@ -310,10 +336,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const buf = await readFile(resolved);
       const base64 = buf.toString("base64");
 
-      // Detect provider: native multimodal (google, anthropic) vs OpenAI-compatible (9router)
-      const model = (ctx as any).model;
-      const provider: string = model?.provider ?? "";
-      const supportsNativeImage = model?.input?.includes("image") ?? false;
+      // Vision config: per-project > global > auto-detect from ctx.model
+      const visionConfig = await loadVisionConfig(ctx.cwd);
+      const provider: string = visionConfig.provider ?? (ctx as any).model?.provider ?? "";
+      const modelId: string = visionConfig.modelId ?? (ctx as any).model?.id ?? "kr/auto";
+      const supportsNativeImage = (ctx as any).model?.input?.includes("image") ?? false;
 
       // Native providers (google, anthropic, etc) — return image content directly
       const nativeProviders = ["google", "google-vertex", "anthropic", "amazon-bedrock"];
@@ -330,7 +357,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       // OpenAI-compatible / 9router — use vision API endpoint
       const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
       const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
-      const modelId = model?.id ?? process.env.PI_MODEL ?? "kr/auto";
 
       if (!apiKey) {
         // No 9router key and non-native provider — return image anyway, hope for the best
