@@ -7,6 +7,7 @@ import { verifyTasks } from "./verifier.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
 import { renderProgressWidget, renderProgressStatus } from "./progress.js";
+import { hexToOklch, hexBatchToOklch } from "./color.js";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -231,6 +232,28 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         content: [{ type: "text", text: `✓ Confirmed. ${state.tasks.length} tasks assembled. Pipeline started.` }],
         details: {}
       };
+    }
+  });
+
+  pi.registerTool({
+    name: "hex_to_oklch",
+    label: "Hex to OKLCH",
+    description: "Convert hex color(s) to OKLCH format. Accepts single hex or JSON object of name:hex pairs.",
+    parameters: Type.Object({
+      colors: Type.Union([
+        Type.String({ description: "Single hex color like #FF7A59" }),
+        Type.Record(Type.String(), Type.String(), { description: "Object of name:hex pairs like {primary: '#FF7A59', secondary: '#1E63D6'}" })
+      ])
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (typeof params.colors === "string") {
+        const oklch = hexToOklch(params.colors);
+        return { content: [{ type: "text" as const, text: `${params.colors} → ${oklch}` }], details: {} };
+      }
+      const results = hexBatchToOklch(params.colors as Record<string, string>);
+      const lines = Object.entries(results).map(([name, { hex, oklch }]) => `| ${name} | ${hex} | ${oklch} |`);
+      const table = `| Token | Hex | OKLCH |\n|---|---|---|\n${lines.join("\n")}`;
+      return { content: [{ type: "text" as const, text: table }], details: {} };
     }
   });
 
