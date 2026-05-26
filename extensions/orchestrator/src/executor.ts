@@ -93,9 +93,18 @@ Plan the UX/UI layout for the full site. For each section in the page spec:
 - Choose which design tokens to apply
 - Plan component hierarchy
 - Note responsive breakpoints
+- Plan BEHAVIORS: scroll effects, hover states, transitions, animations
+- Plan EFFECTS: gradients, overlays, clip-paths, backdrop-blur, decorative elements
+- Plan INTERACTIONS: navbar scroll behavior (transparent→solid), parallax, stagger reveals
 
 Write the shape plan to ${projectDir}/SHAPE.md with section-by-section breakdown.
 Use Tailwind CSS classes in your plan. Follow DESIGN.md colors/typography exactly.
+Include specific Tailwind classes for:
+- Scroll-triggered transitions (intersection observer + opacity/translate)
+- Navbar: sticky top-0, bg-transparent → bg-white/80 backdrop-blur on scroll
+- Gradient overlays: bg-gradient-to-b, from-black/50
+- Clip paths: clip-path polygon/circle for image masking
+- Hover states: hover:scale, hover:shadow-xl, group-hover
 Report when done.`;
 
     case "assemble-page":
@@ -121,28 +130,58 @@ Wire it into any form/auth components that need it.`;
 
     case "polish":
       return `You are now acting as the impeccable polish skill.
-Read PRODUCT.md, DESIGN.md, and all HTML/component files in ${projectDir}/src/.
+Read PRODUCT.md, DESIGN.md, SHAPE.md, and all HTML/component files in ${projectDir}/src/.
 
-Perform a final quality pass:
-- Check color consistency against DESIGN.md tokens
-- Verify typography scale matches spec
-- Ensure spacing rhythm is consistent
-- Fix any visual hierarchy issues
-- Improve micro-interactions (hover states, transitions)
-- Ensure all text is readable (contrast)
-- Add subtle polish (shadows, borders, transitions)
+Perform a final quality pass focusing on BEHAVIORAL FIDELITY:
+- Navbar: must transition from transparent to solid on scroll (JS + Tailwind)
+- Hero: verify gradient overlays, shades, decorative elements match reference
+- Images: check clip-path/mask implementations, object-fit, aspect ratios
+- Hover states: every interactive element needs visible hover feedback
+- Transitions: smooth (duration-300, ease-out), no jarring jumps
+- Scroll animations: fade-in-up on viewport entry (intersection observer)
+- Shadows: verify elevation hierarchy matches design system
+- Gradients: check direction, stops, opacity match reference
+- Decorative: floating shapes, blur blobs, dot patterns if in spec
+- Spacing rhythm: verify section padding consistency
+- Color consistency: all colors from DESIGN.md tokens, no hardcoded values
+- Typography scale: verify heading hierarchy matches spec
 
-Edit files directly. Use Tailwind CSS. Report changes made.`;
+Edit files directly. Use Tailwind CSS. Add JS for scroll behaviors if needed.
+Report changes made.`;
 
     case "audit":
       return `You are now acting as the impeccable audit skill.
 Read all HTML/component files in ${projectDir}/src/.
+Read DESIGN.md and SHAPE.md for reference.
 
 Perform technical quality checks:
-- Accessibility: alt text, aria labels, focus states, color contrast, semantic HTML
-- Performance: image sizes, lazy loading, minimal JS
-- Responsive: test all breakpoints (mobile 640px, tablet 1024px, desktop)
-- SEO: meta tags, heading hierarchy, structured data
+
+**Accessibility:**
+- Alt text on all images (descriptive, not "image")
+- Aria labels on interactive elements
+- Focus states visible (ring-2 or outline)
+- Color contrast WCAG AA (check against DESIGN.md tokens)
+- Semantic HTML (nav, main, section, article, footer)
+- Skip-to-content link
+
+**Behavioral completeness:**
+- Navbar scroll behavior implemented (not just static)
+- All hover states working (buttons, cards, links)
+- Scroll reveal animations present where spec requires
+- Image clip-paths/masks rendering correctly
+- Gradient overlays visible and correct direction
+- Responsive: all breakpoints tested (mobile 640px, tablet 1024px)
+
+**Performance:**
+- Images: lazy loading (loading="lazy"), proper dimensions
+- No layout shift (explicit width/height or aspect-ratio)
+- Minimal JS (intersection observer only, no heavy libs)
+- Tailwind CDN is fine for prototype
+
+**Design fidelity:**
+- Compare each section against page-spec.json behaviors/effects
+- Flag any missing interactions or effects from the spec
+- Verify decorative elements present (shapes, patterns, blobs)
 
 Fix all issues found directly in the files. Report what was fixed.`;
 
@@ -193,6 +232,35 @@ Requirements:
 - Always use object-cover and include alt attributes
 - Make it responsive (mobile-first)
 - Use semantic HTML
+
+BEHAVIORAL requirements (from page-spec behaviors/effects):
+- Implement ALL scroll behaviors noted in spec (fade-in, slide-up, parallax)
+- Implement ALL hover states (scale, shadow, color shift)
+- Implement gradient overlays/shades if noted
+- Implement clip-paths/masks for images if noted
+- Implement decorative elements (floating shapes, blur blobs, patterns)
+- Add intersection observer JS for scroll-triggered animations
+- Navbar sections: implement transparent→solid scroll transition
+
+For scroll animations, add this pattern:
+\`\`\`html
+<div class="opacity-0 translate-y-8 transition-all duration-700" data-reveal>
+  <!-- content -->
+</div>
+<script>
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.remove('opacity-0', 'translate-y-8'); } });
+}, { threshold: 0.1 });
+document.querySelectorAll('[data-reveal]').forEach(el => observer.observe(el));
+</script>
+\`\`\`
+
+For clip-path images:
+\`\`\`html
+<div class="[clip-path:polygon(0_0,100%_0,100%_85%,0_100%)]">
+  <img src="..." class="w-full h-full object-cover" />
+</div>
+\`\`\`
 
 Write the complete section HTML. Report when done.`;
       }
