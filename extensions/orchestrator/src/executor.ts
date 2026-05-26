@@ -13,17 +13,25 @@ export function taskToPrompt(task: Task, state: RunState, targetDir: string): st
 
   switch (task.id) {
     // === Scaffold ===
-    case "astro-init":
+    case "astro-init": {
+      const skipCloudflare = !state.answers["domain"] || state.answers["domain"] === "none";
+      const cfLines = skipCloudflare ? "" : `
+pnpm astro add cloudflare --yes`;
       return `Scaffold an Astro project in ${projectDir}:
 \`\`\`bash
 pnpm create astro@latest ${slug} --template minimal --typescript strict --install --no-git --skip-houston
 cd ${projectDir}
-pnpm astro add cloudflare --yes
+pnpm approve-builds esbuild sharp 2>/dev/null || true
+pnpm install
 pnpm astro add react --yes
-pnpm astro add tailwind --yes
+pnpm astro add tailwind --yes${cfLines}
+pnpm approve-builds workerd msw 2>/dev/null || true
+pnpm install
 git init && git add -A && git commit -m "chore: scaffold"
 \`\`\`
-Run these commands. Report when done.`;
+Run these commands. If approve-builds fails for unknown packages, skip it.
+Report when done.`;
+    }
 
     case "supabase-provision":
       return `Use supabase MCP to create project "${slug}". Then apply schema for level "${backend}":
@@ -107,11 +115,43 @@ Include specific Tailwind classes for:
 - Hover states: hover:scale, hover:shadow-xl, group-hover
 Report when done.`;
 
-    case "assemble-page":
+    case "assemble-page": {
+      const isAstro = (state.answers["framework"] as string) === "astro";
+      if (isAstro) {
+        return `Read the page-spec from ${targetDir}/.orchestrator/specs/page-spec.json for section order.
+Create ${projectDir}/src/pages/index.astro that imports all section components from src/components/sections/ and renders them in order.
+
+Example:
+\`\`\`astro
+---
+import Navbar from "../components/sections/navbar.astro";
+import Hero from "../components/sections/hero.astro";
+// ... import all sections
+---
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Site Title</title>
+</head>
+<body class="antialiased">
+  <Navbar />
+  <main>
+    <Hero />
+    <!-- ... all sections in order -->
+  </main>
+  <Footer />
+</body>
+</html>
+\`\`\`
+
+Use the section order from page-spec.json. Report when done.`;
+      }
       return `Call the merge_sections tool to combine all section HTML files into src/index.html.
 It will read sections from ${projectDir}/src/sections/ in page-spec order and inject into the base template.
 After merging, verify the result looks correct by reading the output file.
 Report when done.`;
+    }
 
     case "wire-supabase":
       return `In ${projectDir}, create src/lib/supabase.ts:
@@ -211,12 +251,34 @@ Report when done.`;
       // craft-{section} tasks
       if (task.id.startsWith("craft-")) {
         const sectionId = task.id.replace("craft-", "");
+        const isAstro = (state.answers["framework"] as string) === "astro";
+        const fileExt = isAstro ? "astro" : "html";
+        const outputDir = isAstro ? "src/components/sections" : "src/sections";
+        const outputPath = `${projectDir}/${outputDir}/${sectionId}.${fileExt}`;
+
+        const astroNote = isAstro ? `
+This is an Astro component. Use Astro component syntax:
+- Frontmatter between --- fences for imports/logic
+- HTML template below
+- <style> tag for scoped styles if needed
+- Can use React components from shadcn with client:load directive
+Example:
+\`\`\`astro
+---
+import { Button } from "@/components/ui/button";
+---
+<section>
+  <Button client:load>Click</Button>
+</section>
+\`\`\`
+` : "";
+
         return `You are now acting as the impeccable craft skill.
 Read PRODUCT.md, DESIGN.md, and SHAPE.md in ${projectDir}/.
 Read the page-spec section "${sectionId}" from ${targetDir}/.orchestrator/specs/page-spec.json.
 
-Build the "${sectionId}" section as a complete HTML component in ${projectDir}/src/sections/${sectionId}.html.
-
+Build the "${sectionId}" section as a complete ${isAstro ? "Astro" : "HTML"} component in ${outputPath}.
+${astroNote}
 Requirements:
 - Use Tailwind CSS for ALL styling (reference DESIGN.md tokens)
 - Follow the layout plan from SHAPE.md for this section
@@ -258,7 +320,7 @@ For clip-path images:
 </div>
 \`\`\`
 
-Write the complete section HTML. Report when done.`;
+Write the complete section ${fileExt}. Report when done.`;
       }
       if (task.id === "static-init") {
         return `Create a static HTML project in ${projectDir}:
