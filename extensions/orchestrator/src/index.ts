@@ -12,8 +12,8 @@ import { homedir } from "node:os";
 import { join, extname } from "node:path";
 
 interface VisionConfig {
-  provider?: string;
-  modelId?: string;
+  provider?: string | undefined;
+  modelId?: string | undefined;
 }
 
 /**
@@ -304,6 +304,56 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const updated = retryTask(state, taskId);
       await saveState(ctx.cwd, updated);
       ctx.ui.notify(`Task ${taskId} reset to pending. Run /orchestrator:resume to continue.`, "info");
+    }
+  });
+
+  pi.registerCommand("orchestrator:vision-config", {
+    description: "Configure vision model: /orchestrator:vision-config [--global] [provider/modelId | show | reset]",
+    handler: async (args, ctx) => {
+      const raw = (args ?? "").trim();
+      const isGlobal = raw.includes("--global");
+      const arg = raw.replace("--global", "").trim();
+
+      const configDir = isGlobal
+        ? join(homedir(), ".pi/orchestrator")
+        : join(ctx.cwd, ".orchestrator");
+      const configPath = join(configDir, "vision.json");
+
+      // Show current config
+      if (!arg || arg === "show") {
+        const config = await loadVisionConfig(ctx.cwd);
+        if (!config.provider && !config.modelId) {
+          ctx.ui.notify("Vision: auto-detect (using current model)", "info");
+        } else {
+          ctx.ui.notify(`Vision: ${config.provider ?? "auto"}/${config.modelId ?? "auto"}\nSource: ${existsSync(join(ctx.cwd, ".orchestrator/vision.json")) ? "project" : existsSync(join(homedir(), ".pi/orchestrator/vision.json")) ? "global" : "none"}`, "info");
+        }
+        return;
+      }
+
+      // Reset
+      if (arg === "reset") {
+        if (existsSync(configPath)) {
+          const { unlink } = await import("node:fs/promises");
+          await unlink(configPath);
+          ctx.ui.notify(`Vision config removed: ${configPath}`, "info");
+        } else {
+          ctx.ui.notify("No vision config to reset.", "info");
+        }
+        return;
+      }
+
+      // Set: provider/modelId
+      const parts = arg.split("/");
+      let config: VisionConfig;
+      if (parts.length >= 2) {
+        config = { provider: parts[0], modelId: parts.slice(1).join("/") };
+      } else {
+        config = { modelId: arg };
+      }
+
+      await mkdir(configDir, { recursive: true });
+      await writeFile(configPath, JSON.stringify(config, null, 2));
+      ctx.ui.notify(`Vision config saved ${isGlobal ? "(global)" : "(project)"}:\n${JSON.stringify(config, null, 2)}`, "info");
     }
   });
 
