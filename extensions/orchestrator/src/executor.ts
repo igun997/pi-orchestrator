@@ -27,9 +27,62 @@ pnpm astro add react --yes
 pnpm astro add tailwind --yes${cfLines}
 pnpm approve-builds workerd msw 2>/dev/null || true
 pnpm install
-git init && git add -A && git commit -m "chore: scaffold"
 \`\`\`
-Run these commands. If approve-builds fails for unknown packages, skip it.
+
+Then configure astro.config.mjs for STATIC generation:
+\`\`\`javascript
+import { defineConfig } from 'astro/config';
+import react from '@astrojs/react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  output: 'static',
+  integrations: [react()],
+  vite: { plugins: [tailwindcss()] }
+});
+\`\`\`
+
+Also set up tsconfig.json paths:
+\`\`\`json
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
+\`\`\`
+
+Create directory structure:
+\`\`\`bash
+mkdir -p src/components/ui src/components/sections src/layouts src/pages src/styles
+\`\`\`
+
+Create src/layouts/BaseLayout.astro:
+\`\`\`astro
+---
+interface Props { title: string; description?: string; }
+const { title, description } = Astro.props;
+---
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  {description && <meta name="description" content={description} />}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body class="antialiased font-[Poppins]">
+  <slot />
+</body>
+</html>
+\`\`\`
+
+Then: git init && git add -A && git commit -m "chore: scaffold"
 Report when done.`;
     }
 
@@ -185,9 +238,22 @@ Perform a final quality pass focusing on BEHAVIORAL FIDELITY:
 Edit files directly. Use Tailwind CSS. Add JS for scroll behaviors if needed.
 Report changes made.`;
 
-    case "audit":
+    case "audit": {
+      const isAstro = (state.answers["framework"] as string) === "astro";
+      const astroChecks = isAstro ? `
+**Astro-specific:**
+- output: 'static' in astro.config.mjs (SSG, no server)
+- No unnecessary client:load directives (only for interactive React components)
+- Reusable UI components in src/components/ui/ (not duplicated inline)
+- Section components import from ui/ (DRY)
+- BaseLayout.astro used in pages
+- Props typed with interface
+- No inline <script> that could be an Astro component
+- Images use Astro <Image /> or proper loading="lazy"
+- Build test: run \`pnpm build\` and verify dist/ output is static HTML
+` : "";
       return `You are now acting as the impeccable audit skill.
-Read all HTML/component files in ${projectDir}/src/.
+Read all ${isAstro ? ".astro" : "HTML"} files in ${projectDir}/src/.
 Read DESIGN.md and SHAPE.md for reference.
 
 Perform technical quality checks:
@@ -212,14 +278,14 @@ Perform technical quality checks:
 - Images: lazy loading (loading="lazy"), proper dimensions
 - No layout shift (explicit width/height or aspect-ratio)
 - Minimal JS (intersection observer only, no heavy libs)
-- Tailwind CDN is fine for prototype
-
+${astroChecks}
 **Design fidelity:**
 - Compare each section against page-spec.json behaviors/effects
 - Flag any missing interactions or effects from the spec
 - Verify decorative elements present (shapes, patterns, blobs)
 
 Fix all issues found directly in the files. Report what was fixed.`;
+    }
 
     // === Deploy ===
     case "cf-build":
@@ -257,20 +323,37 @@ Report when done.`;
         const outputPath = `${projectDir}/${outputDir}/${sectionId}.${fileExt}`;
 
         const astroNote = isAstro ? `
-This is an Astro component. Use Astro component syntax:
-- Frontmatter between --- fences for imports/logic
-- HTML template below
-- <style> tag for scoped styles if needed
-- Can use React components from shadcn with client:load directive
-Example:
+This is an Astro component (.astro file). Follow these patterns:
+
+1. REUSABLE UI components go in src/components/ui/ (Button.astro, Card.astro, Badge.astro)
+2. SECTION components go in src/components/sections/ and import from ui/
+3. Only use client:load on React components that need interactivity (shadcn)
+4. Prefer Astro components (zero JS) over React unless state/interactivity needed
+5. Use Astro props for data passing
+
+Pattern:
 \`\`\`astro
 ---
-import { Button } from "@/components/ui/button";
+// src/components/sections/${sectionId}.astro
+import Button from "@/components/ui/Button.astro";
+import Card from "@/components/ui/Card.astro";
+
+interface Props { class?: string; }
+const { class: className } = Astro.props;
 ---
-<section>
-  <Button client:load>Click</Button>
+<section class:list={["py-16 lg:py-20", className]}>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <!-- section content using reusable components -->
+    <Card>
+      <h3>Title</h3>
+    </Card>
+    <Button variant="primary" href="#">CTA</Button>
+  </div>
 </section>
 \`\`\`
+
+If you need a reusable UI component that doesn't exist yet, CREATE it in src/components/ui/ first.
+Common UI components to create: Button.astro, Card.astro, Badge.astro, SectionHeading.astro
 ` : "";
 
         return `You are now acting as the impeccable craft skill.
