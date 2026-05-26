@@ -281,12 +281,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     }
   });
 
-  // === Image reading tool (uses 9router vision for OpenAI-compatible models) ===
+  // === Image reading tool (auto-detects provider for vision) ===
 
   pi.registerTool({
     name: "read_image",
     label: "Read Image",
-    description: "Read and analyze a local image file. Returns detailed visual description. Supports jpg, png, gif, webp.",
+    description: "Read and analyze a local image file. Returns visual content or description depending on model capabilities.",
     parameters: Type.Object({
       path: Type.String({ description: "Absolute or relative path to the image file" }),
       prompt: Type.Optional(Type.String({ description: "What to extract or focus on (default: describe everything)" }))
@@ -309,24 +309,41 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
       const buf = await readFile(resolved);
       const base64 = buf.toString("base64");
-      const dataUri = `data:${mime};base64,${base64}`;
 
-      // Use 9router vision endpoint (OpenAI-compatible with image_url)
-      const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
-      const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
-      const model = process.env.NINEROUTER_MODEL ?? process.env.PI_MODEL ?? "kr/auto";
+      // Detect provider: native multimodal (google, anthropic) vs OpenAI-compatible (9router)
+      const model = (ctx as any).model;
+      const provider: string = model?.provider ?? "";
+      const supportsNativeImage = model?.input?.includes("image") ?? false;
 
-      if (!apiKey) {
-        // Fallback: return image content for native multimodal models
+      // Native providers (google, anthropic, etc) — return image content directly
+      const nativeProviders = ["google", "google-vertex", "anthropic", "amazon-bedrock"];
+      if (nativeProviders.includes(provider) && supportsNativeImage) {
         return {
           content: [
             { type: "image" as const, data: base64, mimeType: mime },
-            { type: "text" as const, text: `Image loaded: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
+            { type: "text" as const, text: `Image: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
           ],
           details: {}
         };
       }
 
+      // OpenAI-compatible / 9router — use vision API endpoint
+      const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
+      const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
+      const modelId = process.env.NINEROUTER_MODEL ?? process.env.PI_MODEL ?? "kr/auto";
+
+      if (!apiKey) {
+        // No 9router key and non-native provider — return image anyway, hope for the best
+        return {
+          content: [
+            { type: "image" as const, data: base64, mimeType: mime },
+            { type: "text" as const, text: `Image: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
+          ],
+          details: {}
+        };
+      }
+
+      const dataUri = `data:${mime};base64,${base64}`;
       const userPrompt = params.prompt ?? "Describe this image in exhaustive detail. Include all visible text, colors, layout, components, and structure.";
 
       try {
@@ -334,7 +351,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({
-            model,
+            model: modelId,
             messages: [{
               role: "user",
               content: [
