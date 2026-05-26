@@ -281,14 +281,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     }
   });
 
-  // === Native image reading tool (uses pi's built-in multimodal) ===
+  // === Image reading tool (uses 9router vision for OpenAI-compatible models) ===
 
   pi.registerTool({
     name: "read_image",
     label: "Read Image",
-    description: "Read a local image file and return it for visual analysis. Supports jpg, png, gif, webp.",
+    description: "Read and analyze a local image file. Returns detailed visual description. Supports jpg, png, gif, webp.",
     parameters: Type.Object({
-      path: Type.String({ description: "Absolute or relative path to the image file" })
+      path: Type.String({ description: "Absolute or relative path to the image file" }),
+      prompt: Type.Optional(Type.String({ description: "What to extract or focus on (default: describe everything)" }))
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const resolved = params.path.startsWith("/") ? params.path : join(ctx.cwd, params.path);
@@ -308,14 +309,58 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
       const buf = await readFile(resolved);
       const base64 = buf.toString("base64");
+      const dataUri = `data:${mime};base64,${base64}`;
 
-      return {
-        content: [
-          { type: "image" as const, data: base64, mimeType: mime },
-          { type: "text" as const, text: `Image loaded: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
-        ],
-        details: {}
-      };
+      // Use 9router vision endpoint (OpenAI-compatible with image_url)
+      const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
+      const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
+      const model = process.env.NINEROUTER_MODEL ?? process.env.PI_MODEL ?? "kr/auto";
+
+      if (!apiKey) {
+        // Fallback: return image content for native multimodal models
+        return {
+          content: [
+            { type: "image" as const, data: base64, mimeType: mime },
+            { type: "text" as const, text: `Image loaded: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
+          ],
+          details: {}
+        };
+      }
+
+      const userPrompt = params.prompt ?? "Describe this image in exhaustive detail. Include all visible text, colors, layout, components, and structure.";
+
+      try {
+        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: userPrompt },
+                { type: "image_url", image_url: { url: dataUri } }
+              ]
+            }],
+            stream: false
+          })
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return { content: [{ type: "text" as const, text: `Vision API error ${res.status}: ${errText}` }], details: {} };
+        }
+
+        const json = await res.json() as { choices: { message: { content: string } }[] };
+        const description = json.choices?.[0]?.message?.content ?? "No response";
+
+        return {
+          content: [{ type: "text" as const, text: `[Image: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)]\n\n${description}` }],
+          details: {}
+        };
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: `Vision error: ${e.message}` }], details: {} };
+      }
     }
   });
 }
