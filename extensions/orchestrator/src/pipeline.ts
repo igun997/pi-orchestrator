@@ -40,7 +40,7 @@ export async function advancePipeline(targetDir: string, driver: PipelineDriver)
   const dispatched: string[] = [];
   for (const task of ready) {
     const prompt = taskToPrompt(task, state, targetDir);
-    driver.sendMessage(`[Task: ${task.id}]\n\n${prompt}\n\nWhen done, run: /orchestrator:task-done ${task.id}`);
+    driver.sendMessage(`[Task: ${task.id}]\n\n${prompt}\n\nWhen done, call the orchestrator_task_done tool with taskId: "${task.id}"`);
     dispatched.push(task.id);
   }
 
