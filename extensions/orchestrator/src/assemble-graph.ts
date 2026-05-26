@@ -73,7 +73,10 @@ function planDeployTasks(domain?: string): Task[] {
 export function assembleTaskGraph(inputs: AssemblyInputs): Task[] {
   const scaffoldTasks = planScaffoldTasks(inputs.framework, inputs.backend);
   const buildTasks = planBuildTasks(inputs.sections);
-  const deployTasks = planDeployTasks(inputs.domain === "workers.dev" ? undefined : inputs.domain);
+
+  // Skip deploy entirely if domain is "none"
+  const skipDeploy = !inputs.domain || inputs.domain === "none";
+  const deployTasks = skipDeploy ? [] : planDeployTasks(inputs.domain === "workers.dev" ? undefined : inputs.domain);
 
   // Build tasks root (impeccable-shape) depends on all scaffold tasks
   const scaffoldIds = scaffoldTasks.map((t) => t.id);
@@ -83,9 +86,8 @@ export function assembleTaskGraph(inputs: AssemblyInputs): Task[] {
   });
 
   // Deploy root (cf-build) depends on audit
-  const auditId = "audit";
-  const deployWithDeps = deployTasks.map((t) => {
-    if (t.deps.length === 0) return { ...t, deps: [auditId] };
+  const deployWithDeps = skipDeploy ? [] : deployTasks.map((t) => {
+    if (t.deps.length === 0) return { ...t, deps: ["audit"] };
     return t;
   });
 

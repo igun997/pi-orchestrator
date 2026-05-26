@@ -6,11 +6,10 @@ import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.j
 import { verifyTasks } from "./verifier.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
-import { callVision, loadVisionConfig } from "./vision-client.js";
 import { existsSync } from "node:fs";
-import { writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
   pi.registerCommand("orchestrator:start", {
@@ -20,91 +19,43 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const state = await createRun({ targetDir: ctx.cwd, ...parsed });
       ctx.ui.notify(renderStatus(state), "info");
 
-      // === Vision extraction via 9router ===
-      let config;
-      try {
-        config = loadVisionConfig();
-      } catch (e: any) {
-        ctx.ui.notify(`Vision config error: ${e.message}. Set NINEROUTER_URL + NINEROUTER_API_KEY.`, "error");
-        return;
-      }
-
       const dsImage = parsed.designSystemImage.startsWith("/") ? parsed.designSystemImage : join(ctx.cwd, parsed.designSystemImage);
       const pageImage = parsed.pageImage.startsWith("/") ? parsed.pageImage : join(ctx.cwd, parsed.pageImage);
 
       const specsDir = join(ctx.cwd, ".orchestrator/specs");
       await mkdir(specsDir, { recursive: true });
 
-      ctx.ui.notify("Extracting design system from image...", "info");
-      try {
-        const dsResult = await callVision(config, [dsImage], [
-          "Extract the design system from this image as JSON.",
-          "Include: colors (hex), typography (fontFamilies, scale with size/line-height, weights),",
-          "spacing (unit + scale), radii, shadows, borders, components (name, variants, states).",
-          "Output ONLY valid JSON, no markdown fences."
-        ].join(" "));
-
-        let dsJson: string;
-        try {
-          const parsed = JSON.parse(dsResult.content.replace(/^```json?\n?|```$/g, "").trim());
-          dsJson = JSON.stringify(parsed, null, 2);
-        } catch {
-          dsJson = dsResult.content;
-        }
-        await writeFile(join(specsDir, "design-system.json"), dsJson);
-        ctx.ui.notify(`✓ Design system extracted (${dsResult.usage?.completionTokens ?? "?"} tokens)`, "info");
-      } catch (e: any) {
-        ctx.ui.notify(`Design system extraction failed: ${e.message}`, "error");
-        return;
-      }
-
-      ctx.ui.notify("Extracting page structure from image...", "info");
-      try {
-        const pageResult = await callVision(config, [pageImage], [
-          "Extract the page structure from this image as JSON.",
-          "Format: { meta: { inferredPageType }, layout: { grid, breakpoints, container },",
-          "sections: [{ id (kebab-case), kind, order (0-indexed), content: { headline, ... },",
-          "components: [...], notes: [...] }] }.",
-          "Output ONLY valid JSON, no markdown fences."
-        ].join(" "));
-
-        let pageJson: string;
-        try {
-          const parsed = JSON.parse(pageResult.content.replace(/^```json?\n?|```$/g, "").trim());
-          pageJson = JSON.stringify(parsed, null, 2);
-        } catch {
-          pageJson = pageResult.content;
-        }
-        await writeFile(join(specsDir, "page-spec.json"), pageJson);
-        ctx.ui.notify(`✓ Page spec extracted (${pageResult.usage?.completionTokens ?? "?"} tokens)`, "info");
-      } catch (e: any) {
-        ctx.ui.notify(`Page extraction failed: ${e.message}`, "error");
-        return;
-      }
-
       // Update state
-      state.phase = "questioning";
+      state.phase = "extracting";
       state.specs = {
         designSystem: ".orchestrator/specs/design-system.json",
         page: ".orchestrator/specs/page-spec.json"
       };
       await saveState(ctx.cwd, state);
 
-      // Kick LLM — minimal questions, then auto-confirm
+      // Use native pi multimodal — send images to LLM for extraction
       pi.sendUserMessage(
         [
-          `Vision extraction complete. Specs saved to .orchestrator/specs/.`,
-          `Design system, colors, typography, tone, and branding already extracted from images — follow the reference exactly.`,
-          `Tailwind CSS is always used for styling.`,
+          `Orchestrator run started. Use the read_image tool to view both images, then extract specs.`,
           ``,
-          `Only 4 questions needed. Ask one at a time. After each answer, use the orchestrator_answer tool to save it:`,
-          `1. What language do you want me to use for this conversation? (English/Indonesian/etc) → key: "language"`,
-          `2. Static HTML or framework (Astro + shadcn)? → key: "framework", value: "astro" or "static"`,
-          `3. Backend need — none / contact-form / auth / cms? → key: "backend-level"`,
-          `4. Deploy to workers.dev or custom domain? → key: "domain"`,
+          `Step 1: Read design system image with read_image tool: ${dsImage}`,
+          `Extract as JSON and save to ${specsDir}/design-system.json using write tool.`,
+          `Format: { colors: {hex}, typography: {fontFamilies, scale, weights}, spacing, radii, shadows, borders, components: [{name, variants, states}] }`,
           ``,
-          `After ALL answers saved via orchestrator_answer tool, call orchestrator_confirm tool to start the pipeline.`,
-          `If user just says "go" without answering, use defaults (English, astro, none, workers.dev) and save+confirm.`
+          `Step 2: Read page image with read_image tool: ${pageImage}`,
+          `Extract as JSON and save to ${specsDir}/page-spec.json using write tool.`,
+          `Format: { meta: {inferredPageType}, layout: {grid, breakpoints, container}, sections: [{id (kebab-case), kind, order, content: {headline,...}, components, notes}] }`,
+          ``,
+          `Step 3: After both specs saved, ask these questions (one at a time). Save each with orchestrator_answer tool:`,
+          `- Language for conversation? (key: "language")`,
+          `- Static HTML or Astro + shadcn? (key: "framework", value: "astro" or "static")`,
+          `- Backend: none / contact-form / auth / cms? (key: "backend-level")`,
+          `- Deploy: none / workers.dev / custom domain? (key: "domain", use "none" to skip deploy)`,
+          ``,
+          `Step 4: After all answers saved, call orchestrator_confirm tool.`,
+          ``,
+          `Tailwind CSS always used. Design/tone/branding from images — follow reference exactly.`,
+          `If user says "go" without answering, use defaults (English, static, none, none) and save+confirm.`
         ].join("\n"),
         { deliverAs: "followUp" }
       );
@@ -330,109 +281,41 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     }
   });
 
-  // === Vision via 9router ===
+  // === Native image reading tool (uses pi's built-in multimodal) ===
 
-  pi.registerCommand("orchestrator:vision", {
-    description: "Extract specs from images via 9router vision: /orchestrator:vision <image1> [image2]",
-    handler: async (args, ctx) => {
-      const images = (args ?? "").trim().split(/\s+/).filter(Boolean);
-      if (images.length === 0) {
-        ctx.ui.notify("Usage: /orchestrator:vision <image1> [image2]", "error");
-        return;
+  pi.registerTool({
+    name: "read_image",
+    label: "Read Image",
+    description: "Read a local image file and return it for visual analysis. Supports jpg, png, gif, webp.",
+    parameters: Type.Object({
+      path: Type.String({ description: "Absolute or relative path to the image file" })
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const resolved = params.path.startsWith("/") ? params.path : join(ctx.cwd, params.path);
+      if (!existsSync(resolved)) {
+        return { content: [{ type: "text" as const, text: `Error: File not found: ${resolved}` }], details: {} };
       }
 
-      let config;
-      try {
-        config = loadVisionConfig();
-      } catch (e: any) {
-        ctx.ui.notify(`Vision config error: ${e.message}`, "error");
-        return;
+      const ext = extname(resolved).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"
+      };
+      const mime = mimeMap[ext];
+      if (!mime) {
+        return { content: [{ type: "text" as const, text: `Error: Unsupported image format: ${ext}` }], details: {} };
       }
 
-      const resolvedImages = images.map((img) => img.startsWith("/") ? img : join(ctx.cwd, img));
-      ctx.ui.notify(`Analyzing ${resolvedImages.length} image(s) via 9router...`, "info");
+      const buf = await readFile(resolved);
+      const base64 = buf.toString("base64");
 
-      try {
-        // Extract design system
-        const dsResult = await callVision(config, resolvedImages.slice(0, 1), [
-          "Extract the design system from this image as JSON.",
-          "Include: colors (hex), typography (fontFamilies, scale with size/line-height, weights),",
-          "spacing (unit + scale), radii, shadows, borders, components (name, variants, states).",
-          "Output ONLY valid JSON, no markdown fences."
-        ].join(" "));
-
-        const specsDir = join(ctx.cwd, ".orchestrator/specs");
-        await mkdir(specsDir, { recursive: true });
-
-        // Try parse JSON, fallback to raw
-        let dsJson: string;
-        try {
-          const parsed = JSON.parse(dsResult.content.replace(/^```json?\n?|```$/g, "").trim());
-          dsJson = JSON.stringify(parsed, null, 2);
-        } catch {
-          dsJson = dsResult.content;
-        }
-        await writeFile(join(specsDir, "design-system.json"), dsJson);
-        ctx.ui.notify(`✓ Design system extracted (${dsResult.usage?.completionTokens ?? "?"} tokens)`, "info");
-
-        // Extract page spec if second image provided
-        if (resolvedImages.length > 1) {
-          const pageResult = await callVision(config, resolvedImages.slice(1, 2), [
-            "Extract the page structure from this image as JSON.",
-            "Format: { meta: { inferredPageType }, layout: { grid, breakpoints, container },",
-            "sections: [{ id (kebab-case), kind, order (0-indexed), content: { headline, ... },",
-            "components: [...], notes: [...] }] }.",
-            "Output ONLY valid JSON, no markdown fences."
-          ].join(" "));
-
-          let pageJson: string;
-          try {
-            const parsed = JSON.parse(pageResult.content.replace(/^```json?\n?|```$/g, "").trim());
-            pageJson = JSON.stringify(parsed, null, 2);
-          } catch {
-            pageJson = pageResult.content;
-          }
-          await writeFile(join(specsDir, "page-spec.json"), pageJson);
-          ctx.ui.notify(`✓ Page spec extracted (${pageResult.usage?.completionTokens ?? "?"} tokens)`, "info");
-        }
-
-        ctx.ui.notify("Vision extraction complete. Specs saved to .orchestrator/specs/", "info");
-      } catch (e: any) {
-        ctx.ui.notify(`Vision error: ${e.message}`, "error");
-      }
-    }
-  });
-
-  pi.registerCommand("orchestrator:vision-describe", {
-    description: "Describe an image via 9router vision: /orchestrator:vision-describe <image> [prompt]",
-    handler: async (args, ctx) => {
-      const parts = (args ?? "").trim().split(/\s+/);
-      const imagePath = parts[0];
-      const prompt = parts.slice(1).join(" ") || "Describe this image in detail.";
-
-      if (!imagePath) {
-        ctx.ui.notify("Usage: /orchestrator:vision-describe <image> [prompt]", "error");
-        return;
-      }
-
-      let config;
-      try {
-        config = loadVisionConfig();
-      } catch (e: any) {
-        ctx.ui.notify(`Vision config error: ${e.message}`, "error");
-        return;
-      }
-
-      const resolved = imagePath.startsWith("/") ? imagePath : join(ctx.cwd, imagePath);
-      ctx.ui.notify(`Analyzing image via 9router...`, "info");
-
-      try {
-        const result = await callVision(config, [resolved], prompt);
-        // Send result as message so LLM can use it
-        pi.sendUserMessage(`[Vision result for ${imagePath}]\n\n${result.content}`, { deliverAs: "followUp" });
-      } catch (e: any) {
-        ctx.ui.notify(`Vision error: ${e.message}`, "error");
-      }
+      return {
+        content: [
+          { type: "image" as const, data: base64, mimeType: mime },
+          { type: "text" as const, text: `Image loaded: ${resolved} (${mime}, ${Math.round(buf.length / 1024)}KB)` }
+        ],
+        details: {}
+      };
     }
   });
 }
