@@ -6,6 +6,7 @@ import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.j
 import { verifyTasks } from "./verifier.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
+import { renderProgressWidget, renderProgressStatus } from "./progress.js";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -35,6 +36,22 @@ async function loadVisionConfig(cwd: string): Promise<VisionConfig> {
     } catch { /* ignore parse errors */ }
   }
   return {};
+}
+
+function createDriver(pi: ExtensionAPI, ctx: any) {
+  return {
+    sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
+    notify: (text: string, level: "info" | "error") => {
+      ctx.ui.notify(text, level);
+      // Update progress widget
+      loadState(ctx.cwd).then((state) => {
+        ctx.ui.setStatus("orchestrator", renderProgressStatus(state.phase, state.tasks));
+        if (state.tasks.length > 0) {
+          ctx.ui.setWidget("orchestrator", renderProgressWidget(state.phase, state.tasks));
+        }
+      }).catch(() => {});
+    }
+  };
 }
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
@@ -107,10 +124,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       await saveState(ctx.cwd, state);
       ctx.ui.notify(`Confirmed. ${state.tasks.length} tasks assembled. Starting seamless execution.`, "info");
 
-      const driver = {
-        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-      };
+      const driver = createDriver(pi, ctx);
       await advancePipeline(ctx.cwd, driver);
     }
   });
@@ -144,10 +158,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       taskId: Type.String({ description: "Task ID to mark complete" })
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const driver = {
-        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-      };
+      const driver = createDriver(pi, ctx);
       await completeTask(ctx.cwd, params.taskId, driver);
       return {
         content: [{ type: "text", text: `✓ ${params.taskId} complete. Pipeline advancing.` }],
@@ -165,10 +176,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       error: Type.String({ description: "Error message" })
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const driver = {
-        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-      };
+      const driver = createDriver(pi, ctx);
       await failTask(ctx.cwd, params.taskId, params.error, driver);
       return {
         content: [{ type: "text", text: `❌ ${params.taskId} failed: ${params.error}` }],
@@ -197,10 +205,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
 
-      const driver = {
-        sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-        notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-      };
+      const driver = createDriver(pi, ctx);
       await advancePipeline(ctx.cwd, driver);
 
       return {
@@ -251,10 +256,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
         // If confirmed, advance pipeline
         if (state.confirmed && state.phase !== "done" && state.phase !== "failed") {
-          const driver = {
-            sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-            notify: (text: string, level: "info" | "error") => ctx.ui.notify(text, level)
-          };
+          const driver = createDriver(pi, ctx);
           await advancePipeline(ctx.cwd, driver);
         }
       } catch {
