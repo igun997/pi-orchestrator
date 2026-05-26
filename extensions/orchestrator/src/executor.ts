@@ -108,14 +108,10 @@ Include specific Tailwind classes for:
 Report when done.`;
 
     case "assemble-page":
-      return `Read all section HTML files from ${projectDir}/src/sections/ (in order from page-spec.json).
-Assemble them into ${projectDir}/src/index.html:
-- Keep the existing <head> with Tailwind CDN
-- Insert all sections in order inside <body>
-- Add smooth scroll behavior
-- Ensure consistent spacing between sections
-
-Write the complete assembled index.html. Report when done.`;
+      return `Call the merge_sections tool to combine all section HTML files into src/index.html.
+It will read sections from ${projectDir}/src/sections/ in page-spec order and inject into the base template.
+After merging, verify the result looks correct by reading the output file.
+Report when done.`;
 
     case "wire-supabase":
       return `In ${projectDir}, create src/lib/supabase.ts:

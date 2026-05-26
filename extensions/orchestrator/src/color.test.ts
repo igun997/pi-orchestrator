@@ -30,8 +30,8 @@ describe("color", () => {
 
   it("batch converts", () => {
     const result = hexBatchToOklch({ primary: "#FF7A59", secondary: "#1E63D6" });
-    expect(result.primary.oklch).toContain("oklch(");
-    expect(result.secondary.oklch).toContain("oklch(");
-    expect(result.primary.hex).toBe("#FF7A59");
+    expect(result["primary"]!.oklch).toContain("oklch(");
+    expect(result["secondary"]!.oklch).toContain("oklch(");
+    expect(result["primary"]!.hex).toBe("#FF7A59");
   });
 });

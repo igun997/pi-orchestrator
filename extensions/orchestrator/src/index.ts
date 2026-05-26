@@ -8,6 +8,7 @@ import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
 import { renderProgressWidget, renderProgressStatus } from "./progress.js";
 import { hexToOklch, hexBatchToOklch } from "./color.js";
+import { mergeSections } from "./merge.js";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -254,6 +255,29 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const lines = Object.entries(results).map(([name, { hex, oklch }]) => `| ${name} | ${hex} | ${oklch} |`);
       const table = `| Token | Hex | OKLCH |\n|---|---|---|\n${lines.join("\n")}`;
       return { content: [{ type: "text" as const, text: table }], details: {} };
+    }
+  });
+
+  pi.registerTool({
+    name: "merge_sections",
+    label: "Merge Sections",
+    description: "Merge all HTML section files from src/sections/ into src/index.html in page-spec order. Call after all craft tasks complete.",
+    parameters: Type.Object({
+      projectDir: Type.Optional(Type.String({ description: "Project directory (default: cwd/site)" }))
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const projectDir = params.projectDir ?? join(ctx.cwd, "site");
+      const specsDir = join(ctx.cwd, ".orchestrator/specs");
+
+      try {
+        const result = await mergeSections(projectDir, specsDir);
+        return {
+          content: [{ type: "text" as const, text: `✓ Merged ${result.sections.length} sections into ${result.merged}\nOrder: ${result.sections.join(" → ")}` }],
+          details: {}
+        };
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: `Error: ${e.message}` }], details: {} };
+      }
     }
   });
 
