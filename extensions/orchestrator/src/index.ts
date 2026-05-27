@@ -247,17 +247,23 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       }
 
       const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
-      try {
-        await runPipeline(ctx.cwd, driver);
-      } finally {
-        if (dashboard) {
-          const finalState = await loadState(ctx.cwd);
-          const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
-          dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
-          // Keep dashboard alive 30s after completion for user to review
-          setTimeout(() => dashboard!.stop(), 30_000);
-        }
-      }
+      runPipeline(ctx.cwd, driver)
+        .then(async () => {
+          ctx.ui.notify("✅ Pipeline complete!", "info");
+          if (dashboard) {
+            const finalState = await loadState(ctx.cwd);
+            const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+            dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        })
+        .catch(async (err) => {
+          ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+          if (dashboard) {
+            dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        });
     }
   });
 
@@ -287,6 +293,16 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       try {
         const state = await loadState(ctx.cwd);
+
+        // Reset stale "running" tasks → "pending" (subagents are in-memory, lost on crash)
+        const staleRunning = state.tasks.filter((t) => t.status === "running");
+        for (const t of staleRunning) {
+          t.status = "pending";
+        }
+        if (staleRunning.length > 0) {
+          ctx.ui.notify(`Reset ${staleRunning.length} stale running task(s) to pending`, "info");
+        }
+
         const fileExists = async (path: string) => existsSync(path);
         const slug = slugFromState(state);
         const framework = (state.answers["framework"] as string) ?? "astro";
@@ -315,16 +331,23 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           }
 
           const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
-          try {
-            await runPipeline(ctx.cwd, driver);
-          } finally {
-            if (dashboard) {
-              const finalState = await loadState(ctx.cwd);
-              const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
-              dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
-              setTimeout(() => dashboard!.stop(), 30_000);
-            }
-          }
+          runPipeline(ctx.cwd, driver)
+            .then(async () => {
+              ctx.ui.notify("✅ Pipeline complete!", "info");
+              if (dashboard) {
+                const finalState = await loadState(ctx.cwd);
+                const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+                dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+                setTimeout(() => dashboard!.stop(), 30_000);
+              }
+            })
+            .catch(async (err) => {
+              ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+              if (dashboard) {
+                dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+                setTimeout(() => dashboard!.stop(), 30_000);
+              }
+            });
         }
       } catch {
         ctx.ui.notify("No orchestrator run found. Use /orchestrator:start first.", "error");
@@ -468,7 +491,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
 
-      // Launch subagent pipeline
+      // Launch subagent pipeline — fire-and-forget (don't block tool call)
       let dashboard: DashboardHandle | undefined;
       if (state.options.dashboard) {
         dashboard = await startDashboard({ open: true });
@@ -478,19 +501,26 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       }
 
       const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
-      try {
-        await runPipeline(ctx.cwd, driver);
-      } finally {
-        if (dashboard) {
-          const finalState = await loadState(ctx.cwd);
-          const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
-          dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
-          setTimeout(() => dashboard!.stop(), 30_000);
-        }
-      }
+      runPipeline(ctx.cwd, driver)
+        .then(async () => {
+          ctx.ui.notify("✅ Pipeline complete!", "info");
+          if (dashboard) {
+            const finalState = await loadState(ctx.cwd);
+            const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+            dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        })
+        .catch(async (err) => {
+          ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+          if (dashboard) {
+            dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        });
 
       return {
-        content: [{ type: "text", text: `✓ Pipeline complete. ${state.tasks.length} tasks executed via subagents.` }],
+        content: [{ type: "text", text: `✓ Confirmed. ${state.tasks.length} tasks queued. Pipeline running in background.` }],
         details: {}
       };
     }
