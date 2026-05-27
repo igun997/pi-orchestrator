@@ -102,7 +102,7 @@ export async function failTask(targetDir: string, taskId: string, error: string,
   driver.notify(`❌ ${taskId} failed: ${error}`, "error");
 }
 
-function isImpeccableTask(id: string): boolean {
+export function isImpeccableTask(id: string): boolean {
   return id === "impeccable-shape" || id.startsWith("craft-") || id === "polish" || id === "audit";
 }
 
