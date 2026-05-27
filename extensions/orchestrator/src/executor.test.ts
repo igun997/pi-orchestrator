@@ -14,6 +14,7 @@ function makeState(overrides: Partial<RunState> & { answers?: Record<string, unk
     tasks: [],
     stack: {},
     config: { autoHeal: false, maxParallelImpeccable: 3 },
+    options: { dashboard: false },
     deployment: {},
     ...overrides
   };

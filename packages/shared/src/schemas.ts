@@ -64,6 +64,7 @@ export const RunStateSchema = z.object({
   tasks: z.array(TaskSchema),
   stack: z.record(z.unknown()).default({}),
   config: z.object({ autoHeal: z.boolean().default(false), maxParallelImpeccable: z.number().int().positive().default(3) }).default({}),
+  options: z.object({ dashboard: z.boolean().default(false) }).default({}),
   deployment: z.object({ url: z.string().optional() }).default({})
 });
 

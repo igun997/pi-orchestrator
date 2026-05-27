@@ -1,6 +1,7 @@
 export interface StartArgs {
   autoHeal: boolean;
   tui: boolean;
+  dashboard: boolean;
   designSystemImage: string;
   pageImage: string;
 }
@@ -9,6 +10,7 @@ export function parseStartArgs(raw: string): StartArgs {
   const parts = raw.trim().split(/\s+/).filter(Boolean);
   const autoHeal = parts.includes("--auto-heal");
   const tui = parts.includes("--tui");
+  const dashboard = parts.includes("--dashboard");
   const images = parts.filter((part) => !part.startsWith("--"));
 
   if (images.length !== 2) {
@@ -18,6 +20,7 @@ export function parseStartArgs(raw: string): StartArgs {
   return {
     autoHeal,
     tui,
+    dashboard,
     designSystemImage: images[0]!,
     pageImage: images[1]!
   };

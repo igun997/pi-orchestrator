@@ -25,6 +25,7 @@ describe("runs", () => {
       confirmed: false,
       stack: {},
       config: { autoHeal: false, maxParallelImpeccable: 3 },
+      options: { dashboard: false },
       deployment: {}
     })).toContain("extracting");
   });
@@ -60,6 +61,7 @@ describe("runs", () => {
       confirmed: false,
       stack: {},
       config: { autoHeal: false, maxParallelImpeccable: 3 },
+      options: { dashboard: false },
       deployment: {}
     };
 

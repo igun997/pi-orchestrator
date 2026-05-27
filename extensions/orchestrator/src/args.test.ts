@@ -6,6 +6,7 @@ describe("parseStartArgs", () => {
     expect(parseStartArgs("--auto-heal --tui ds.png page.png")).toEqual({
       autoHeal: true,
       tui: true,
+      dashboard: false,
       designSystemImage: "ds.png",
       pageImage: "page.png"
     });
