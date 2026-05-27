@@ -39,6 +39,7 @@ This repo now includes a Cursor-compatible layer that keeps the same phase contr
 - Project config: `.cursor/rules/`, `.cursor/hooks.json`, `.cursor/hooks/`, `.cursor/skills/`
 - Global install target: `~/.cursor/rules/`, `~/.cursor/hooks.json`, `~/.cursor/hooks/`, `~/.cursor/skills/`
 - Flow guard hook asks for confirmation when deploy commands run before `.orchestrator/state.json` has `confirmed: true`
+- Command mapping guide: `docs/cursor-command-map.md`
 
 Install commands:
 
