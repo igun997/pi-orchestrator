@@ -1,16 +1,16 @@
-import type { Task } from "@orchestrator/shared";
+import type { Task, OutputMode } from "@orchestrator/shared";
 import { join } from "node:path";
 
 type FileChecker = (path: string) => Promise<boolean>;
 
 export interface VerifyOptions {
-  framework?: "astro" | "static";
+  outputMode: OutputMode;
   projectDir: string;
 }
 
 function expectedFile(taskId: string, opts: VerifyOptions): string | null {
-  const { projectDir, framework } = opts;
-  const isAstro = framework !== "static";
+  const { projectDir, outputMode } = opts;
+  const isAstro = outputMode !== "static";
 
   if (taskId.startsWith("craft-")) {
     const sectionId = taskId.replace("craft-", "");
@@ -24,9 +24,9 @@ function expectedFile(taskId: string, opts: VerifyOptions): string | null {
       : join(projectDir, "src/index.html");
   }
   if (taskId === "cf-build") {
-    return isAstro
-      ? join(projectDir, "dist/_worker.js")
-      : join(projectDir, "dist/index.html");
+    if (outputMode === "static") return join(projectDir, "dist/index.html");
+    if (outputMode === "astro-server") return join(projectDir, "dist/_worker.js");
+    return join(projectDir, "dist/index.html"); // astro-static
   }
   return null;
 }

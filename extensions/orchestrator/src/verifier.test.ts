@@ -4,70 +4,99 @@ import type { Task } from "@orchestrator/shared";
 
 describe("verifyTasks", () => {
   const fileExists = (path: string) => Promise.resolve(path.includes("hero"));
-  const astroOpts: VerifyOptions = { projectDir: "/tmp/site", framework: "astro" };
-  const staticOpts: VerifyOptions = { projectDir: "/tmp/site", framework: "static" };
+  const staticOpts: VerifyOptions = { projectDir: "/tmp/site", outputMode: "static" };
+  const astroStaticOpts: VerifyOptions = { projectDir: "/tmp/site", outputMode: "astro-static" };
+  const astroServerOpts: VerifyOptions = { projectDir: "/tmp/site", outputMode: "astro-server" };
 
-  it("keeps complete task when file exists (astro)", async () => {
-    const tasks: Task[] = [{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }];
-    const result = await verifyTasks(tasks, astroOpts, fileExists);
-    expect(result.find((t) => t.id === "craft-hero")!.status).toBe("complete");
-  });
-
-  it("checks correct astro path: src/components/sections/", async () => {
+  // === craft paths ===
+  it("astro-static: craft checks src/components/sections/*.astro", async () => {
     const checked: string[] = [];
     const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
-    const tasks: Task[] = [{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }];
-    await verifyTasks(tasks, astroOpts, spy);
+    await verifyTasks([{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }], astroStaticOpts, spy);
     expect(checked[0]).toBe("/tmp/site/src/components/sections/hero.astro");
   });
 
-  it("checks correct static path: src/sections/", async () => {
+  it("astro-server: craft checks src/components/sections/*.astro", async () => {
     const checked: string[] = [];
     const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
-    const tasks: Task[] = [{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }];
-    await verifyTasks(tasks, staticOpts, spy);
+    await verifyTasks([{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }], astroServerOpts, spy);
+    expect(checked[0]).toBe("/tmp/site/src/components/sections/hero.astro");
+  });
+
+  it("static: craft checks src/sections/*.html", async () => {
+    const checked: string[] = [];
+    const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
+    await verifyTasks([{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }], staticOpts, spy);
     expect(checked[0]).toBe("/tmp/site/src/sections/hero.html");
   });
 
-  it("marks complete task pending when file missing", async () => {
-    const tasks: Task[] = [{ id: "craft-pricing", name: "Craft pricing", status: "complete", deps: [] }];
-    const result = await verifyTasks(tasks, astroOpts, fileExists);
-    expect(result.find((t) => t.id === "craft-pricing")!.status).toBe("pending");
-  });
-
-  it("always marks deploy tasks pending", async () => {
-    const tasks: Task[] = [{ id: "cf-deploy", name: "Deploy", status: "complete", deps: [] }];
-    const result = await verifyTasks(tasks, astroOpts, fileExists);
-    expect(result.find((t) => t.id === "cf-deploy")!.status).toBe("pending");
-  });
-
-  it("leaves pending tasks unchanged", async () => {
-    const tasks: Task[] = [{ id: "craft-hero", name: "Craft hero", status: "pending", deps: [] }];
-    const result = await verifyTasks(tasks, astroOpts, fileExists);
-    expect(result.find((t) => t.id === "craft-hero")!.status).toBe("pending");
-  });
-
-  it("checks static assemble-page at src/index.html", async () => {
+  // === assemble-page paths ===
+  it("astro-static: assemble checks src/pages/index.astro", async () => {
     const checked: string[] = [];
     const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
-    const tasks: Task[] = [{ id: "assemble-page", name: "Assemble", status: "complete", deps: [] }];
-    await verifyTasks(tasks, staticOpts, spy);
+    await verifyTasks([{ id: "assemble-page", name: "Assemble", status: "complete", deps: [] }], astroStaticOpts, spy);
+    expect(checked[0]).toBe("/tmp/site/src/pages/index.astro");
+  });
+
+  it("static: assemble checks src/index.html", async () => {
+    const checked: string[] = [];
+    const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
+    await verifyTasks([{ id: "assemble-page", name: "Assemble", status: "complete", deps: [] }], staticOpts, spy);
     expect(checked[0]).toBe("/tmp/site/src/index.html");
   });
 
-  it("astro cf-build checks dist/_worker.js", async () => {
+  // === cf-build dist artifacts ===
+  it("astro-static: cf-build checks dist/index.html", async () => {
     const checked: string[] = [];
     const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
-    const tasks: Task[] = [{ id: "cf-build", name: "Build", status: "complete", deps: [] }];
-    await verifyTasks(tasks, astroOpts, spy);
+    await verifyTasks([{ id: "cf-build", name: "Build", status: "complete", deps: [] }], astroStaticOpts, spy);
+    expect(checked[0]).toBe("/tmp/site/dist/index.html");
+  });
+
+  it("astro-server: cf-build checks dist/_worker.js", async () => {
+    const checked: string[] = [];
+    const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
+    await verifyTasks([{ id: "cf-build", name: "Build", status: "complete", deps: [] }], astroServerOpts, spy);
     expect(checked[0]).toBe("/tmp/site/dist/_worker.js");
   });
 
-  it("static cf-build checks dist/index.html", async () => {
+  it("static: cf-build checks dist/index.html", async () => {
     const checked: string[] = [];
     const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
-    const tasks: Task[] = [{ id: "cf-build", name: "Build", status: "complete", deps: [] }];
-    await verifyTasks(tasks, staticOpts, spy);
+    await verifyTasks([{ id: "cf-build", name: "Build", status: "complete", deps: [] }], staticOpts, spy);
     expect(checked[0]).toBe("/tmp/site/dist/index.html");
+  });
+
+  // === general behavior ===
+  it("keeps complete task when file exists", async () => {
+    const result = await verifyTasks(
+      [{ id: "craft-hero", name: "Craft hero", status: "complete", deps: [] }],
+      astroStaticOpts, fileExists
+    );
+    expect(result[0]!.status).toBe("complete");
+  });
+
+  it("marks complete task pending when file missing", async () => {
+    const result = await verifyTasks(
+      [{ id: "craft-pricing", name: "Craft pricing", status: "complete", deps: [] }],
+      astroStaticOpts, fileExists
+    );
+    expect(result[0]!.status).toBe("pending");
+  });
+
+  it("always marks deploy tasks pending", async () => {
+    const result = await verifyTasks(
+      [{ id: "cf-deploy", name: "Deploy", status: "complete", deps: [] }],
+      astroStaticOpts, fileExists
+    );
+    expect(result[0]!.status).toBe("pending");
+  });
+
+  it("leaves pending tasks unchanged", async () => {
+    const result = await verifyTasks(
+      [{ id: "craft-hero", name: "Craft hero", status: "pending", deps: [] }],
+      astroStaticOpts, fileExists
+    );
+    expect(result[0]!.status).toBe("pending");
   });
 });

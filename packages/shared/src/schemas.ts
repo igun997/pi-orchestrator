@@ -72,3 +72,23 @@ export type PageSpec = z.infer<typeof PageSpecSchema>;
 export type RunState = z.infer<typeof RunStateSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type Phase = z.infer<typeof PhaseSchema>;
+
+/**
+ * Three output modes:
+ * - "static"       : pure HTML + Tailwind CDN, zero npm, no build step
+ * - "astro-static" : Astro SSG, pnpm build → dist/index.html
+ * - "astro-server" : Astro SSR with Cloudflare adapter, pnpm build → dist/_worker.js
+ */
+export type OutputMode = "static" | "astro-static" | "astro-server";
+
+/**
+ * Derive output mode from user answers.
+ * - framework="static" → static (no npm, CDN only)
+ * - framework="astro" + backend none/contact-form → astro-static (SSG)
+ * - framework="astro" + backend auth/cms → astro-server (SSR, needs server routes)
+ */
+export function resolveOutputMode(framework: string, backend: string): OutputMode {
+  if (framework === "static" || framework?.includes("static")) return "static";
+  if (backend === "auth" || backend === "cms") return "astro-server";
+  return "astro-static";
+}

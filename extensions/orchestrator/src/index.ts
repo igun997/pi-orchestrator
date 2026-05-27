@@ -1,4 +1,4 @@
-import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet } from "@orchestrator/shared";
+import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet, resolveOutputMode } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseStartArgs } from "./args.js";
@@ -310,8 +310,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         const state = await loadState(ctx.cwd);
         const fileExists = async (path: string) => existsSync(path);
         const slug = slugFromState(state);
-        const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
-        const verified = await verifyTasks(state.tasks, { projectDir: join(ctx.cwd, slug), framework }, fileExists);
+        const framework = (state.answers["framework"] as string) ?? "astro";
+        const backend = (state.answers["backend-level"] as string) ?? "none";
+        const outputMode = resolveOutputMode(framework, backend);
+        const verified = await verifyTasks(state.tasks, { projectDir: join(ctx.cwd, slug), outputMode }, fileExists);
 
         const invalidated = verified.filter((t, i) => state.tasks[i]?.status === "complete" && t.status === "pending");
         state.tasks = verified;
