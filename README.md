@@ -32,6 +32,24 @@ Before first run, ensure these MCP servers are configured:
 
 Run `/orchestrator:doctor` to check availability.
 
+## Cursor compatibility (project + global)
+
+This repo now includes a Cursor-compatible layer that keeps the same phase contract as pi:
+
+- Project config: `.cursor/rules/`, `.cursor/hooks.json`, `.cursor/hooks/`, `.cursor/skills/`
+- Global install target: `~/.cursor/rules/`, `~/.cursor/hooks.json`, `~/.cursor/hooks/`, `~/.cursor/skills/`
+- Flow guard hook asks for confirmation when deploy commands run before `.orchestrator/state.json` has `confirmed: true`
+
+Install commands:
+
+```bash
+node scripts/install-cursor-compat.mjs           # project only
+node scripts/install-cursor-compat.mjs --global  # global ~/.cursor
+node scripts/uninstall-cursor-compat.mjs --dry-run
+node scripts/uninstall-cursor-compat.mjs
+node scripts/uninstall-cursor-compat.mjs --global
+```
+
 ## Commands
 
 | Command | Description |
@@ -59,6 +77,10 @@ pnpm install
 pnpm test          # run all tests
 pnpm typecheck     # typecheck all packages
 pnpm build         # build all packages
+pnpm cursor:install
+pnpm cursor:install:global
+pnpm cursor:uninstall
+pnpm cursor:uninstall:global
 ```
 
 ## Project structure

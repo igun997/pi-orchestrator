@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/orchestrator-flow-guard.mjs",
+        "matcher": "wrangler\\s+deploy|npm\\s+run\\s+deploy|pnpm\\s+deploy|pnpm\\s+run\\s+deploy|cloudflare",
+        "failClosed": false
+      }
+    ]
+  }
+}

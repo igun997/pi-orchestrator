@@ -1,0 +1,14 @@
+---
+description: Keep Cursor orchestration flow aligned with pi-orchestrator phases
+alwaysApply: true
+---
+
+# pi-orchestrator flow compatibility
+
+When working in this repository, keep Cursor-native execution aligned with the existing pi-orchestrator contract.
+
+- Use the same phase order: `extracting -> questioning -> confirming -> scaffolding -> building -> deploying -> done`.
+- Never skip confirmation before scaffold/build/deploy actions.
+- Keep run state under `.orchestrator/` (`state.json` and `specs/*.json`) so `/orchestrator:*` commands and resume logic stay compatible.
+- Prefer Cursor native subagents for isolated task execution, but preserve task boundaries and outputs expected by the pi pipeline.
+- Do not change task ids, state keys, or required output files unless migration is explicitly requested.

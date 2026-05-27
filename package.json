@@ -8,7 +8,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "cursor:install": "node scripts/install-cursor-compat.mjs",
+    "cursor:install:global": "node scripts/install-cursor-compat.mjs --global",
+    "cursor:uninstall": "node scripts/uninstall-cursor-compat.mjs",
+    "cursor:uninstall:global": "node scripts/uninstall-cursor-compat.mjs --global"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

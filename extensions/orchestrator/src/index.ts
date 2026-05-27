@@ -42,10 +42,13 @@ async function loadVisionConfig(cwd: string): Promise<VisionConfig> {
 }
 
 /**
- * Find the impeccable skill path for injection into subagent sessions.
+ * Find impeccable skill path for injection into subagent sessions.
+ * Prefer project/local Cursor installs, then global Cursor, then pi default.
  */
-function findImpeccableSkillPath(): string | undefined {
+function findImpeccableSkillPath(cwd: string): string | undefined {
   const candidates = [
+    join(cwd, ".cursor/skills/impeccable/SKILL.md"),
+    join(homedir(), ".cursor/skills/impeccable/SKILL.md"),
     join(homedir(), ".pi/agent/skills/impeccable/SKILL.md"),
   ];
   return candidates.find((p) => existsSync(p));
@@ -95,7 +98,7 @@ function createSubagentDriver(ctx: any, targetDir: string, dashboard?: Dashboard
         model: ctx.model,
         modelRegistry: ctx.modelRegistry,
         cwd: targetDir,
-        impeccableSkillPath: findImpeccableSkillPath(),
+        impeccableSkillPath: findImpeccableSkillPath(targetDir),
         onProgress: (msg) => {
           ctx.ui.notify(msg, "info");
           updateWidget();
