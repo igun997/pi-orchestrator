@@ -23,7 +23,11 @@ function expectedFile(taskId: string, opts: VerifyOptions): string | null {
       ? join(projectDir, "src/pages/index.astro")
       : join(projectDir, "src/index.html");
   }
-  if (taskId === "cf-build") return join(projectDir, "dist/_worker.js");
+  if (taskId === "cf-build") {
+    return isAstro
+      ? join(projectDir, "dist/_worker.js")
+      : join(projectDir, "dist/index.html");
+  }
   return null;
 }
 

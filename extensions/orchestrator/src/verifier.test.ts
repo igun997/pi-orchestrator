@@ -54,4 +54,20 @@ describe("verifyTasks", () => {
     await verifyTasks(tasks, staticOpts, spy);
     expect(checked[0]).toBe("/tmp/site/src/index.html");
   });
+
+  it("astro cf-build checks dist/_worker.js", async () => {
+    const checked: string[] = [];
+    const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
+    const tasks: Task[] = [{ id: "cf-build", name: "Build", status: "complete", deps: [] }];
+    await verifyTasks(tasks, astroOpts, spy);
+    expect(checked[0]).toBe("/tmp/site/dist/_worker.js");
+  });
+
+  it("static cf-build checks dist/index.html", async () => {
+    const checked: string[] = [];
+    const spy = (path: string) => { checked.push(path); return Promise.resolve(true); };
+    const tasks: Task[] = [{ id: "cf-build", name: "Build", status: "complete", deps: [] }];
+    await verifyTasks(tasks, staticOpts, spy);
+    expect(checked[0]).toBe("/tmp/site/dist/index.html");
+  });
 });
