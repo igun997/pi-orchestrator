@@ -241,7 +241,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       let dashboard: DashboardHandle | undefined;
       if (state.options.dashboard) {
         dashboard = await startDashboard({ open: true });
-        ctx.ui.notify(`Dashboard: ${dashboard.url}`, "info");
+        ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+        ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
         dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
       }
 
@@ -308,7 +309,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
           let dashboard: DashboardHandle | undefined;
           if (state.options.dashboard) {
             dashboard = await startDashboard({ open: true });
-            ctx.ui.notify(`Dashboard: ${dashboard.url}`, "info");
+            ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+            ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
             dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
           }
 
@@ -470,6 +472,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       let dashboard: DashboardHandle | undefined;
       if (state.options.dashboard) {
         dashboard = await startDashboard({ open: true });
+        ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+        ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
         dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
       }
 
