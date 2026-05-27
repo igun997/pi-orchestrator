@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { parseStartArgs } from "./args.js";
 import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.js";
 import { verifyTasks } from "./verifier.js";
+import { slugFromState } from "./executor.js";
 import { advancePipeline, completeTask, failTask } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
 import { renderProgressWidget, renderProgressStatus } from "./progress.js";
@@ -308,7 +309,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       try {
         const state = await loadState(ctx.cwd);
         const fileExists = async (path: string) => existsSync(path);
-        const verified = await verifyTasks(state.tasks, ctx.cwd, fileExists);
+        const slug = slugFromState(state);
+        const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
+        const verified = await verifyTasks(state.tasks, { projectDir: join(ctx.cwd, slug), framework }, fileExists);
 
         const invalidated = verified.filter((t, i) => state.tasks[i]?.status === "complete" && t.status === "pending");
         state.tasks = verified;

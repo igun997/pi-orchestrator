@@ -32,13 +32,32 @@ export async function advancePipeline(targetDir: string, driver: PipelineDriver)
     return { dispatched: [], done: allDone, failed };
   }
 
-  // Mark ready tasks as running
-  state.tasks = state.tasks.map((t) => ready.some((r) => r.id === t.id) ? { ...t, status: "running" as const } : t);
+  // Enforce maxParallelImpeccable: cap concurrent impeccable-bound tasks
+  // Impeccable tasks = impeccable-shape, craft-*, polish, audit
+  const maxParallel = state.config?.maxParallelImpeccable ?? 3;
+  const runningImpeccable = state.tasks.filter(
+    (t) => t.status === "running" && isImpeccableTask(t.id)
+  ).length;
+  const availableSlots = Math.max(0, maxParallel - runningImpeccable);
+
+  // Split ready tasks into impeccable-bound and non-impeccable
+  const impeccableReady = ready.filter((t) => isImpeccableTask(t.id));
+  const otherReady = ready.filter((t) => !isImpeccableTask(t.id));
+
+  // Throttle impeccable tasks, dispatch all non-impeccable freely
+  const toDispatch = [...otherReady, ...impeccableReady.slice(0, availableSlots)];
+
+  if (toDispatch.length === 0) {
+    return { dispatched: [], done: false, failed: [] };
+  }
+
+  // Mark dispatched tasks as running
+  state.tasks = state.tasks.map((t) => toDispatch.some((r) => r.id === t.id) ? { ...t, status: "running" as const } : t);
   await saveState(targetDir, state);
 
-  // Send prompts for ready tasks (parallel-safe tasks get dispatched together)
+  // Send prompts for dispatched tasks
   const dispatched: string[] = [];
-  for (const task of ready) {
+  for (const task of toDispatch) {
     const prompt = taskToPrompt(task, state, targetDir);
     driver.sendMessage(`[Task: ${task.id}]\n\n${prompt}\n\nWhen done, call the orchestrator_task_done tool with taskId: "${task.id}"`);
     dispatched.push(task.id);
@@ -81,6 +100,10 @@ export async function failTask(targetDir: string, taskId: string, error: string,
   state.phase = "failed";
   await saveState(targetDir, state);
   driver.notify(`❌ ${taskId} failed: ${error}`, "error");
+}
+
+function isImpeccableTask(id: string): boolean {
+  return id === "impeccable-shape" || id.startsWith("craft-") || id === "polish" || id === "audit";
 }
 
 function determinePhase(state: RunState): RunState["phase"] {

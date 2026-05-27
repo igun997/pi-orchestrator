@@ -60,9 +60,16 @@ Create directory structure:
 mkdir -p src/components/ui src/components/sections src/layouts src/pages src/styles
 \`\`\`
 
+Create src/styles/global.css (Tailwind v4 CSS entry point):
+\`\`\`css
+@import "tailwindcss";
+\`\`\`
+
 Create src/layouts/BaseLayout.astro:
 \`\`\`astro
 ---
+import '../styles/global.css';
+
 interface Props { title: string; description?: string; }
 const { title, description } = Astro.props;
 ---
@@ -288,13 +295,32 @@ Fix all issues found directly in the files. Report what was fixed.`;
     }
 
     // === Deploy ===
-    case "cf-build":
-      return `In ${projectDir}, run:
+    case "cf-build": {
+      const isAstro = (state.answers["framework"] as string) === "astro";
+      if (isAstro) {
+        return `In ${projectDir}, run:
 \`\`\`bash
 cd ${projectDir}
 pnpm build
 \`\`\`
-Verify dist/_worker.js exists. Report when done.`;
+Verify dist/ output contains static HTML files. Report when done.`;
+      }
+      // Static HTML: use @tailwindcss/cli to compile production CSS, then copy to dist/
+      return `In ${projectDir}, build production static site:
+\`\`\`bash
+cd ${projectDir}
+pnpm exec tailwindcss -i src/styles/input.css -o dist/output.css --minify
+mkdir -p dist
+cp src/index.html dist/index.html
+cp -r public/* dist/ 2>/dev/null || true
+\`\`\`
+Then edit dist/index.html:
+- Remove the \`<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>\` tag
+- Replace with \`<link rel="stylesheet" href="/output.css" />\`
+
+This produces optimized, purged CSS for production. No CDN script in production.
+Report when done.`;
+    }
 
     case "cf-worker-create":
       return `Use cloudflare MCP to create a Worker named "${slug}". If it already exists, skip. Report when done.`;
@@ -408,18 +434,50 @@ Write the complete section ${fileExt}. Report when done.`;
       if (task.id === "static-init") {
         return `Create a static HTML project in ${projectDir}:
 \`\`\`bash
-mkdir -p ${projectDir}/src/sections ${projectDir}/public
+mkdir -p ${projectDir}/src/sections ${projectDir}/src/styles ${projectDir}/public
 cd ${projectDir}
 pnpm init -y
+pnpm add -D tailwindcss @tailwindcss/cli
 \`\`\`
-Create src/index.html with Tailwind CDN (script tag: https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4).
+
+Create src/styles/input.css (Tailwind v4 CSS entry point for CLI build):
+\`\`\`css
+@import "tailwindcss";
+\`\`\`
+
+Create src/index.html with Tailwind CDN for development:
+\`\`\`html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="antialiased">
+  <!-- sections -->
+</body>
+</html>
+\`\`\`
+
+Add build script to package.json:
+\`\`\`json
+{ "scripts": { "build": "tailwindcss -i src/styles/input.css -o dist/output.css --minify" } }
+\`\`\`
+
+IMPORTANT: Do NOT install Vite, PostCSS, webpack, or any bundler.
+Do NOT create vite.config, postcss.config, or tailwind.config files.
+Tailwind v4 needs only @tailwindcss/cli for static HTML builds.
+The CDN script is for development preview only — production uses the CLI build.
+
 Report when done.`;
       }
       return `Execute task "${task.id}": ${task.name}. Use Tailwind CSS for styling. Report when done.`;
   }
 }
 
-function slugFromState(state: RunState): string {
+export function slugFromState(state: RunState): string {
   const name = (state.answers["product-name"] as string) ?? "site";
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "site";
 }
