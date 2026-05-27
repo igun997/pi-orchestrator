@@ -4,8 +4,8 @@ import { assemblePage } from "./assemble.js";
 describe("assemblePage", () => {
   it("generates astro page with imports and components in order", () => {
     const page = assemblePage([{ id: "hero" }, { id: "pricing" }]);
-    expect(page).toContain('import Hero from "../components/hero.astro"');
-    expect(page).toContain('import Pricing from "../components/pricing.astro"');
+    expect(page).toContain('import Hero from "../components/sections/hero.astro"');
+    expect(page).toContain('import Pricing from "../components/sections/pricing.astro"');
     expect(page).toContain("<Hero />");
     expect(page).toContain("<Pricing />");
     expect(page.indexOf("<Hero />")).toBeLessThan(page.indexOf("<Pricing />"));

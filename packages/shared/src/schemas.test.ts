@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DesignSystemSchema, PageSpecSchema, RunStateSchema } from "./schemas.js";
+import { DesignSystemSchema, PageSpecSchema, RunStateSchema, resolveOutputMode } from "./schemas.js";
 
 describe("schemas", () => {
   it("validates design system tokens", () => {
@@ -32,5 +32,23 @@ describe("schemas", () => {
 
   it("rejects invalid run phase", () => {
     expect(() => RunStateSchema.parse({ runId: "r", phase: "wat", createdAt: new Date().toISOString(), inputs: {}, tasks: [] })).toThrow();
+  });
+});
+
+describe("resolveOutputMode", () => {
+  it("static framework → static mode regardless of backend", () => {
+    expect(resolveOutputMode("static", "none")).toBe("static");
+    expect(resolveOutputMode("static", "auth")).toBe("static");
+    expect(resolveOutputMode("static", "cms")).toBe("static");
+  });
+
+  it("astro + none/contact-form → astro-static", () => {
+    expect(resolveOutputMode("astro", "none")).toBe("astro-static");
+    expect(resolveOutputMode("astro", "contact-form")).toBe("astro-static");
+  });
+
+  it("astro + auth/cms → astro-server", () => {
+    expect(resolveOutputMode("astro", "auth")).toBe("astro-server");
+    expect(resolveOutputMode("astro", "cms")).toBe("astro-server");
   });
 });

@@ -1,14 +1,17 @@
-import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet } from "@orchestrator/shared";
+import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet, resolveOutputMode } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseStartArgs } from "./args.js";
 import { createRun, listRuns, renderStatus, resetRun, retryTask } from "./runs.js";
 import { verifyTasks } from "./verifier.js";
-import { advancePipeline, completeTask, failTask } from "./pipeline.js";
+import { slugFromState } from "./executor.js";
+import { runPipeline, type PipelineDriver } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
-import { renderProgressWidget, renderProgressStatus } from "./progress.js";
+import { progressWidgetFactory, renderProgressStatus, computeStats } from "./progress.js";
 import { hexToOklch, hexBatchToOklch } from "./color.js";
 import { mergeSections } from "./merge.js";
+import { spawnTaskAgent, type TaskResult } from "./subagent.js";
+import { startDashboard, type DashboardHandle } from "./dashboard.js";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -23,14 +26,12 @@ interface VisionConfig {
  * Load vision config: per-project (.orchestrator/vision.json) > global (~/.pi/orchestrator/vision.json) > undefined
  */
 async function loadVisionConfig(cwd: string): Promise<VisionConfig> {
-  // Per-project
   const projectPath = join(cwd, ".orchestrator/vision.json");
   if (existsSync(projectPath)) {
     try {
       return JSON.parse(await readFile(projectPath, "utf8"));
     } catch { /* ignore parse errors */ }
   }
-  // Global
   const globalPath = join(homedir(), ".pi/orchestrator/vision.json");
   if (existsSync(globalPath)) {
     try {
@@ -40,28 +41,120 @@ async function loadVisionConfig(cwd: string): Promise<VisionConfig> {
   return {};
 }
 
-function createDriver(pi: ExtensionAPI, ctx: any) {
-  return {
-    sendMessage: (text: string) => pi.sendUserMessage(text, { deliverAs: "followUp" }),
-    notify: (text: string, level: "info" | "error") => {
-      ctx.ui.notify(text, level);
-      // Update progress widget
-      loadState(ctx.cwd).then((state) => {
-        ctx.ui.setStatus("orchestrator", renderProgressStatus(state.phase, state.tasks));
-        if (state.tasks.length > 0) {
-          ctx.ui.setWidget("orchestrator", renderProgressWidget(state.phase, state.tasks));
-        }
-      }).catch(() => {});
+/**
+ * Find the impeccable skill path for injection into subagent sessions.
+ */
+function findImpeccableSkillPath(): string | undefined {
+  const candidates = [
+    join(homedir(), ".pi/agent/skills/impeccable/SKILL.md"),
+  ];
+  return candidates.find((p) => existsSync(p));
+}
+
+/**
+ * Create a subagent-based pipeline driver.
+ * Each task spawns an isolated AgentSession — no context bleed.
+ * Progress tracked via native pi TUI (setWidget/setStatus).
+ * Optionally emits events to a dashboard server.
+ */
+function createSubagentDriver(ctx: any, targetDir: string, dashboard?: DashboardHandle): PipelineDriver {
+  const startTimes = new Map<string, number>();
+  let progressTimer: ReturnType<typeof setInterval> | undefined;
+
+  const updateWidget = async () => {
+    try {
+      const state = await loadState(targetDir);
+      ctx.ui.setStatus("orchestrator", renderProgressStatus(state.phase, state.tasks));
+      if (state.tasks.length > 0) {
+        ctx.ui.setWidget("orchestrator", progressWidgetFactory(state.phase, state.tasks, startTimes));
+      }
+      // Emit stats to dashboard
+      if (dashboard) {
+        const stats = computeStats(state.tasks);
+        dashboard.emit({ type: "stats", ...stats });
+      }
+    } catch { /* ignore if state not readable yet */ }
+  };
+
+  const startProgressTimer = () => {
+    if (!progressTimer) {
+      progressTimer = setInterval(updateWidget, 5_000);
     }
+  };
+
+  const stopProgressTimer = () => {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = undefined;
+    }
+  };
+
+  return {
+    async spawnTask(task, state) {
+      return spawnTaskAgent(task, state, targetDir, {
+        model: ctx.model,
+        modelRegistry: ctx.modelRegistry,
+        cwd: targetDir,
+        impeccableSkillPath: findImpeccableSkillPath(),
+        onProgress: (msg) => {
+          ctx.ui.notify(msg, "info");
+          updateWidget();
+          if (dashboard) {
+            dashboard.emit({ type: "task-log", taskId: task.id, message: msg });
+          }
+        },
+      });
+    },
+
+    notify: (text, level) => {
+      ctx.ui.notify(text, level);
+      updateWidget();
+    },
+
+    onTaskStart: (taskId) => {
+      const now = Date.now();
+      startTimes.set(taskId, now);
+      startProgressTimer();
+      updateWidget();
+      if (dashboard) {
+        const task = [...(startTimes.keys())].length; // just for name lookup
+        dashboard.emit({ type: "task-start", taskId, taskName: taskId, startedAt: now });
+      }
+    },
+
+    onTaskEnd: (taskId, result) => {
+      const started = startTimes.get(taskId);
+      const duration = started ? Date.now() - started : undefined;
+      startTimes.delete(taskId);
+      updateWidget();
+      if (startTimes.size === 0) stopProgressTimer();
+      if (dashboard) {
+        dashboard.emit({
+          type: "task-end",
+          taskId,
+          status: result.status === "complete" ? "complete" : "failed",
+          error: result.status === "failed" ? result.error : undefined,
+          duration,
+        });
+      }
+    },
   };
 }
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
+  // ==========================================================================
+  // Commands
+  // ==========================================================================
+
   pi.registerCommand("orchestrator:start", {
-    description: "Start image-to-site orchestration: /orchestrator:start [--auto-heal] [--tui] <ds-img> <page-img>",
+    description: "Start image-to-site orchestration: /orchestrator:start [--auto-heal] [--tui] [--dashboard] <ds-img> <page-img>",
     handler: async (args, ctx) => {
       const parsed = parseStartArgs(args ?? "");
       const state = await createRun({ targetDir: ctx.cwd, ...parsed });
+      // Store dashboard preference in state options
+      if (parsed.dashboard) {
+        state.options = { ...(state.options ?? {}), dashboard: true };
+      }
       ctx.ui.notify(renderStatus(state), "info");
 
       const dsImage = parsed.designSystemImage.startsWith("/") ? parsed.designSystemImage : join(ctx.cwd, parsed.designSystemImage);
@@ -70,7 +163,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const specsDir = join(ctx.cwd, ".orchestrator/specs");
       await mkdir(specsDir, { recursive: true });
 
-      // Update state
       state.phase = "extracting";
       state.specs = {
         designSystem: ".orchestrator/specs/design-system.json",
@@ -78,7 +170,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       };
       await saveState(ctx.cwd, state);
 
-      // Use native pi multimodal — send images to LLM for extraction
+      // Pre-pipeline: extraction + Q&A runs in parent conversation (needs user interaction)
       pi.sendUserMessage(
         [
           `Orchestrator run started. Use the read_image tool to view both images, then extract specs.`,
@@ -127,7 +219,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("orchestrator:confirm", {
-    description: "Confirm orchestrator plan and start seamless execution (manual trigger)",
+    description: "Confirm orchestrator plan and start subagent pipeline (manual trigger)",
     handler: async (_args, ctx) => {
       const state = await loadState(ctx.cwd);
       if (state.confirmed) {
@@ -143,141 +235,35 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       state.confirmed = true;
       state.phase = "scaffolding";
       await saveState(ctx.cwd, state);
-      ctx.ui.notify(`Confirmed. ${state.tasks.length} tasks assembled. Starting seamless execution.`, "info");
+      ctx.ui.notify(`Confirmed. ${state.tasks.length} tasks assembled. Starting subagent pipeline.`, "info");
 
-      const driver = createDriver(pi, ctx);
-      await advancePipeline(ctx.cwd, driver);
-    }
-  });
-
-  // === Tools (callable by LLM) ===
-
-  pi.registerTool({
-    name: "orchestrator_answer",
-    label: "Save Answer",
-    description: "Save a user answer to orchestrator state. Keys: language, framework, backend-level, domain",
-    parameters: Type.Object({
-      key: Type.String({ description: "Answer key: language, framework, backend-level, or domain" }),
-      value: Type.String({ description: "Answer value" })
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const state = await loadState(ctx.cwd);
-      state.answers[params.key] = params.value;
-      await saveState(ctx.cwd, state);
-      return {
-        content: [{ type: "text", text: `✓ Saved: ${params.key} = ${params.value}` }],
-        details: {}
-      };
-    }
-  });
-
-  pi.registerTool({
-    name: "orchestrator_task_done",
-    label: "Task Done",
-    description: "Mark a pipeline task as complete after executing it",
-    parameters: Type.Object({
-      taskId: Type.String({ description: "Task ID to mark complete" })
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const driver = createDriver(pi, ctx);
-      await completeTask(ctx.cwd, params.taskId, driver);
-      return {
-        content: [{ type: "text", text: `✓ ${params.taskId} complete. Pipeline advancing.` }],
-        details: {}
-      };
-    }
-  });
-
-  pi.registerTool({
-    name: "orchestrator_task_failed",
-    label: "Task Failed",
-    description: "Mark a pipeline task as failed",
-    parameters: Type.Object({
-      taskId: Type.String({ description: "Task ID that failed" }),
-      error: Type.String({ description: "Error message" })
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const driver = createDriver(pi, ctx);
-      await failTask(ctx.cwd, params.taskId, params.error, driver);
-      return {
-        content: [{ type: "text", text: `❌ ${params.taskId} failed: ${params.error}` }],
-        details: {}
-      };
-    }
-  });
-
-  pi.registerTool({
-    name: "orchestrator_confirm",
-    label: "Confirm",
-    description: "Confirm orchestrator plan and start seamless execution. Call after all answers are saved.",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const state = await loadState(ctx.cwd);
-      if (state.confirmed) {
-        return { content: [{ type: "text", text: "Already confirmed. Use /orchestrator:resume." }], details: {} };
+      // Start dashboard if opted in
+      let dashboard: DashboardHandle | undefined;
+      if (state.options.dashboard) {
+        dashboard = await startDashboard({ open: true });
+        ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+        ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
+        dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
       }
 
-      const sections = await loadSectionsFromSpec(ctx.cwd);
-      const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
-      const backend = (state.answers["backend-level"] as string) ?? "none";
-      const domain = (state.answers["domain"] as string) ?? "workers.dev";
-      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, framework, backend, domain, sections });
-      state.confirmed = true;
-      state.phase = "scaffolding";
-      await saveState(ctx.cwd, state);
-
-      const driver = createDriver(pi, ctx);
-      await advancePipeline(ctx.cwd, driver);
-
-      return {
-        content: [{ type: "text", text: `✓ Confirmed. ${state.tasks.length} tasks assembled. Pipeline started.` }],
-        details: {}
-      };
-    }
-  });
-
-  pi.registerTool({
-    name: "hex_to_oklch",
-    label: "Hex to OKLCH",
-    description: "Convert hex color(s) to OKLCH format. Accepts single hex or JSON object of name:hex pairs.",
-    parameters: Type.Object({
-      colors: Type.Union([
-        Type.String({ description: "Single hex color like #FF7A59" }),
-        Type.Record(Type.String(), Type.String(), { description: "Object of name:hex pairs like {primary: '#FF7A59', secondary: '#1E63D6'}" })
-      ])
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (typeof params.colors === "string") {
-        const oklch = hexToOklch(params.colors);
-        return { content: [{ type: "text" as const, text: `${params.colors} → ${oklch}` }], details: {} };
-      }
-      const results = hexBatchToOklch(params.colors as Record<string, string>);
-      const lines = Object.entries(results).map(([name, { hex, oklch }]) => `| ${name} | ${hex} | ${oklch} |`);
-      const table = `| Token | Hex | OKLCH |\n|---|---|---|\n${lines.join("\n")}`;
-      return { content: [{ type: "text" as const, text: table }], details: {} };
-    }
-  });
-
-  pi.registerTool({
-    name: "merge_sections",
-    label: "Merge Sections",
-    description: "Merge all HTML section files from src/sections/ into src/index.html in page-spec order. Call after all craft tasks complete.",
-    parameters: Type.Object({
-      projectDir: Type.Optional(Type.String({ description: "Project directory (default: cwd/site)" }))
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const projectDir = params.projectDir ?? join(ctx.cwd, "site");
-      const specsDir = join(ctx.cwd, ".orchestrator/specs");
-
-      try {
-        const result = await mergeSections(projectDir, specsDir);
-        return {
-          content: [{ type: "text" as const, text: `✓ Merged ${result.sections.length} sections into ${result.merged}\nOrder: ${result.sections.join(" → ")}` }],
-          details: {}
-        };
-      } catch (e: any) {
-        return { content: [{ type: "text" as const, text: `Error: ${e.message}` }], details: {} };
-      }
+      const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
+      runPipeline(ctx.cwd, driver)
+        .then(async () => {
+          ctx.ui.notify("✅ Pipeline complete!", "info");
+          if (dashboard) {
+            const finalState = await loadState(ctx.cwd);
+            const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+            dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        })
+        .catch(async (err) => {
+          ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+          if (dashboard) {
+            dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        });
     }
   });
 
@@ -303,12 +289,26 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("orchestrator:resume", {
-    description: "Resume orchestrator run",
+    description: "Resume orchestrator run with subagent dispatch",
     handler: async (_args, ctx) => {
       try {
         const state = await loadState(ctx.cwd);
+
+        // Reset stale "running" tasks → "pending" (subagents are in-memory, lost on crash)
+        const staleRunning = state.tasks.filter((t) => t.status === "running");
+        for (const t of staleRunning) {
+          t.status = "pending";
+        }
+        if (staleRunning.length > 0) {
+          ctx.ui.notify(`Reset ${staleRunning.length} stale running task(s) to pending`, "info");
+        }
+
         const fileExists = async (path: string) => existsSync(path);
-        const verified = await verifyTasks(state.tasks, ctx.cwd, fileExists);
+        const slug = slugFromState(state);
+        const framework = (state.answers["framework"] as string) ?? "astro";
+        const backend = (state.answers["backend-level"] as string) ?? "none";
+        const outputMode = resolveOutputMode(framework, backend);
+        const verified = await verifyTasks(state.tasks, { projectDir: join(ctx.cwd, slug), outputMode }, fileExists);
 
         const invalidated = verified.filter((t, i) => state.tasks[i]?.status === "complete" && t.status === "pending");
         state.tasks = verified;
@@ -320,10 +320,34 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
         ctx.ui.notify(renderStatus(state), "info");
 
-        // If confirmed, advance pipeline
+        // If confirmed, run full pipeline via subagents
         if (state.confirmed && state.phase !== "done" && state.phase !== "failed") {
-          const driver = createDriver(pi, ctx);
-          await advancePipeline(ctx.cwd, driver);
+          let dashboard: DashboardHandle | undefined;
+          if (state.options.dashboard) {
+            dashboard = await startDashboard({ open: true });
+            ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+            ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
+            dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
+          }
+
+          const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
+          runPipeline(ctx.cwd, driver)
+            .then(async () => {
+              ctx.ui.notify("✅ Pipeline complete!", "info");
+              if (dashboard) {
+                const finalState = await loadState(ctx.cwd);
+                const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+                dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+                setTimeout(() => dashboard!.stop(), 30_000);
+              }
+            })
+            .catch(async (err) => {
+              ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+              if (dashboard) {
+                dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+                setTimeout(() => dashboard!.stop(), 30_000);
+              }
+            });
         }
       } catch {
         ctx.ui.notify("No orchestrator run found. Use /orchestrator:start first.", "error");
@@ -387,7 +411,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         : join(ctx.cwd, ".orchestrator");
       const configPath = join(configDir, "vision.json");
 
-      // Show current config
       if (!arg || arg === "show") {
         const config = await loadVisionConfig(ctx.cwd);
         if (!config.provider && !config.modelId) {
@@ -398,7 +421,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // Reset
       if (arg === "reset") {
         if (existsSync(configPath)) {
           const { unlink } = await import("node:fs/promises");
@@ -410,7 +432,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // Set: provider/modelId
       const parts = arg.split("/");
       let config: VisionConfig;
       if (parts.length >= 2) {
@@ -425,7 +446,136 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
     }
   });
 
-  // === Image reading tool (auto-detects provider for vision) ===
+  // ==========================================================================
+  // Tools (callable by LLM in parent conversation)
+  // ==========================================================================
+
+  // Pre-pipeline tools: used during extraction/Q&A phase in parent conversation
+
+  pi.registerTool({
+    name: "orchestrator_answer",
+    label: "Save Answer",
+    description: "Save a user answer to orchestrator state. Keys: language, framework, backend-level, domain",
+    parameters: Type.Object({
+      key: Type.String({ description: "Answer key: language, framework, backend-level, or domain" }),
+      value: Type.String({ description: "Answer value" })
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const state = await loadState(ctx.cwd);
+      state.answers[params.key] = params.value;
+      await saveState(ctx.cwd, state);
+      return {
+        content: [{ type: "text", text: `✓ Saved: ${params.key} = ${params.value}` }],
+        details: {}
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "orchestrator_confirm",
+    label: "Confirm",
+    description: "Confirm orchestrator plan and start subagent pipeline. Call after all answers are saved.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const state = await loadState(ctx.cwd);
+      if (state.confirmed) {
+        return { content: [{ type: "text", text: "Already confirmed. Use /orchestrator:resume." }], details: {} };
+      }
+
+      const sections = await loadSectionsFromSpec(ctx.cwd);
+      const framework = (state.answers["framework"] as string)?.includes("static") ? "static" as const : "astro" as const;
+      const backend = (state.answers["backend-level"] as string) ?? "none";
+      const domain = (state.answers["domain"] as string) ?? "workers.dev";
+      state.tasks = assembleTaskGraph({ targetDir: ctx.cwd, framework, backend, domain, sections });
+      state.confirmed = true;
+      state.phase = "scaffolding";
+      await saveState(ctx.cwd, state);
+
+      // Launch subagent pipeline — fire-and-forget (don't block tool call)
+      let dashboard: DashboardHandle | undefined;
+      if (state.options.dashboard) {
+        dashboard = await startDashboard({ open: true });
+        ctx.ui.notify(`🌐 Dashboard live: ${dashboard.url}`, "info");
+        ctx.ui.setStatus("orchestrator-dash", `🌐 ${dashboard.url}`);
+        dashboard.emit({ type: "pipeline-start", tasks: state.tasks, phase: state.phase });
+      }
+
+      const driver = createSubagentDriver(ctx, ctx.cwd, dashboard);
+      runPipeline(ctx.cwd, driver)
+        .then(async () => {
+          ctx.ui.notify("✅ Pipeline complete!", "info");
+          if (dashboard) {
+            const finalState = await loadState(ctx.cwd);
+            const failed = finalState.tasks.filter((t) => t.status === "failed").map((t) => t.id);
+            dashboard.emit({ type: "pipeline-end", phase: finalState.phase, failed });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        })
+        .catch(async (err) => {
+          ctx.ui.notify(`❌ Pipeline error: ${err?.message ?? err}`, "error");
+          if (dashboard) {
+            dashboard.emit({ type: "pipeline-end", phase: "failed", failed: [] });
+            setTimeout(() => dashboard!.stop(), 30_000);
+          }
+        });
+
+      return {
+        content: [{ type: "text", text: `✓ Confirmed. ${state.tasks.length} tasks queued. Pipeline running in background.` }],
+        details: {}
+      };
+    }
+  });
+
+  // Utility tools: available in both parent and subagent sessions
+  // (These are also in tools.ts for subagent injection, but registered here
+  //  so the parent LLM can use them during extraction phase)
+
+  pi.registerTool({
+    name: "hex_to_oklch",
+    label: "Hex to OKLCH",
+    description: "Convert hex color(s) to OKLCH format. Accepts single hex or JSON object of name:hex pairs.",
+    parameters: Type.Object({
+      colors: Type.Union([
+        Type.String({ description: "Single hex color like #FF7A59" }),
+        Type.Record(Type.String(), Type.String(), { description: "Object of name:hex pairs like {primary: '#FF7A59', secondary: '#1E63D6'}" })
+      ])
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (typeof params.colors === "string") {
+        const oklch = hexToOklch(params.colors);
+        return { content: [{ type: "text" as const, text: `${params.colors} → ${oklch}` }], details: {} };
+      }
+      const results = hexBatchToOklch(params.colors as Record<string, string>);
+      const lines = Object.entries(results).map(([name, { hex, oklch }]) => `| ${name} | ${hex} | ${oklch} |`);
+      const table = `| Token | Hex | OKLCH |\n|---|---|---|\n${lines.join("\n")}`;
+      return { content: [{ type: "text" as const, text: table }], details: {} };
+    }
+  });
+
+  pi.registerTool({
+    name: "merge_sections",
+    label: "Merge Sections",
+    description: "Merge all HTML section files from src/sections/ into src/index.html in page-spec order. Call after all craft tasks complete.",
+    parameters: Type.Object({
+      projectDir: Type.Optional(Type.String({ description: "Project directory (default: cwd/site)" }))
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const projectDir = params.projectDir ?? join(ctx.cwd, "site");
+      const specsDir = join(ctx.cwd, ".orchestrator/specs");
+
+      try {
+        const result = await mergeSections(projectDir, specsDir);
+        return {
+          content: [{ type: "text" as const, text: `✓ Merged ${result.sections.length} sections into ${result.merged}\nOrder: ${result.sections.join(" → ")}` }],
+          details: {}
+        };
+      } catch (e: any) {
+        return { content: [{ type: "text" as const, text: `Error: ${e.message}` }], details: {} };
+      }
+    }
+  });
+
+  // Image reading tool — used in parent for extraction phase, also in tools.ts for subagents
 
   pi.registerTool({
     name: "read_image",
@@ -454,13 +604,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
       const buf = await readFile(resolved);
       const base64 = buf.toString("base64");
 
-      // Vision config: per-project > global > auto-detect from ctx.model
       const visionConfig = await loadVisionConfig(ctx.cwd);
       const provider: string = visionConfig.provider ?? (ctx as any).model?.provider ?? "";
       const modelId: string = visionConfig.modelId ?? (ctx as any).model?.id ?? "kr/auto";
       const supportsNativeImage = (ctx as any).model?.input?.includes("image") ?? false;
 
-      // Native providers (google, anthropic, etc) — return image content directly
       const nativeProviders = ["google", "google-vertex", "anthropic", "amazon-bedrock"];
       if (nativeProviders.includes(provider) && supportsNativeImage) {
         return {
@@ -472,12 +620,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
         };
       }
 
-      // OpenAI-compatible / 9router — use vision API endpoint
       const baseUrl = process.env.NINEROUTER_URL ?? "http://localhost:20128";
       const apiKey = process.env.NINEROUTER_KEY ?? process.env.NINEROUTER_API_KEY ?? "";
 
       if (!apiKey) {
-        // No 9router key and non-native provider — return image anyway, hope for the best
         return {
           content: [
             { type: "image" as const, data: base64, mimeType: mime },

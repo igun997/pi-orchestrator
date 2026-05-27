@@ -64,6 +64,7 @@ export const RunStateSchema = z.object({
   tasks: z.array(TaskSchema),
   stack: z.record(z.unknown()).default({}),
   config: z.object({ autoHeal: z.boolean().default(false), maxParallelImpeccable: z.number().int().positive().default(3) }).default({}),
+  options: z.object({ dashboard: z.boolean().default(false) }).default({}),
   deployment: z.object({ url: z.string().optional() }).default({})
 });
 
@@ -72,3 +73,23 @@ export type PageSpec = z.infer<typeof PageSpecSchema>;
 export type RunState = z.infer<typeof RunStateSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type Phase = z.infer<typeof PhaseSchema>;
+
+/**
+ * Three output modes:
+ * - "static"       : pure HTML + Tailwind CDN, zero npm, no build step
+ * - "astro-static" : Astro SSG, pnpm build → dist/index.html
+ * - "astro-server" : Astro SSR with Cloudflare adapter, pnpm build → dist/_worker.js
+ */
+export type OutputMode = "static" | "astro-static" | "astro-server";
+
+/**
+ * Derive output mode from user answers.
+ * - framework="static" → static (no npm, CDN only)
+ * - framework="astro" + backend none/contact-form → astro-static (SSG)
+ * - framework="astro" + backend auth/cms → astro-server (SSR, needs server routes)
+ */
+export function resolveOutputMode(framework: string, backend: string): OutputMode {
+  if (framework === "static" || framework?.includes("static")) return "static";
+  if (backend === "auth" || backend === "cms") return "astro-server";
+  return "astro-static";
+}

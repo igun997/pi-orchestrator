@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderProgressWidget, renderProgressStatus } from "./progress.js";
+import { renderProgressWidget, renderProgressStatus, progressWidgetFactory, computeStats } from "./progress.js";
 import type { Task } from "@orchestrator/shared";
 
 function task(id: string, status: Task["status"]): Task {
@@ -45,10 +45,68 @@ describe("progress", () => {
     expect(status).toContain("✗1");
   });
 
+  it("shows elapsed time for running tasks", () => {
+    const tasks = [
+      task("craft-hero", "running"),
+    ];
+    const startTimes = new Map([["craft-hero", Date.now() - 45_000]]);
+    const lines = renderProgressWidget("building", tasks, startTimes);
+    const joined = lines.join("\n");
+    expect(joined).toContain("0:45");
+  });
+
+  it("renders without startTimes (backward compatible)", () => {
+    const tasks = [
+      task("craft-hero", "running"),
+    ];
+    const lines = renderProgressWidget("building", tasks);
+    const joined = lines.join("\n");
+    expect(joined).toContain("craft hero");
+    expect(joined).not.toContain("0:");
+  });
+
   it("handles empty tasks", () => {
     const lines = renderProgressWidget("extracting", []);
     expect(lines.length).toBeGreaterThan(2);
     const status = renderProgressStatus("extracting", []);
     expect(status).toBe("orchestrator: extracting");
+  });
+
+  it("computeStats returns correct counts", () => {
+    const tasks = [
+      task("a", "complete"),
+      task("b", "running"),
+      task("c", "pending"),
+      task("d", "failed"),
+      task("e", "skipped"),
+    ];
+    const stats = computeStats(tasks);
+    expect(stats.total).toBe(5);
+    expect(stats.complete).toBe(2); // complete + skipped
+    expect(stats.running).toBe(1);
+    expect(stats.pending).toBe(1);
+    expect(stats.failed).toBe(1);
+    expect(stats.pct).toBe(40);
+  });
+
+  it("progressWidgetFactory returns themed component", () => {
+    const tasks = [
+      task("a", "complete"),
+      task("b", "running"),
+    ];
+    const startTimes = new Map([["b", Date.now() - 30_000]]);
+    const factory = progressWidgetFactory("building", tasks, startTimes);
+
+    // Mock theme
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const component = factory(null, theme);
+    const lines = component.render();
+    expect(lines.length).toBeGreaterThan(3);
+    expect(lines.some((l: string) => l.includes("Orchestrator"))).toBe(true);
+    expect(lines.some((l: string) => l.includes("building"))).toBe(true);
+    expect(lines.some((l: string) => l.includes("0:30"))).toBe(true);
   });
 });

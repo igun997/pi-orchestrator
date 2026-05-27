@@ -1,4 +1,5 @@
-import type { Task, RunState } from "@orchestrator/shared";
+import type { Task, RunState, OutputMode } from "@orchestrator/shared";
+import { resolveOutputMode } from "@orchestrator/shared";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -10,13 +11,19 @@ export function taskToPrompt(task: Task, state: RunState, targetDir: string): st
   const slug = slugFromState(state);
   const projectDir = join(targetDir, slug);
   const backend = (state.answers["backend-level"] as string) ?? "none";
+  const framework = (state.answers["framework"] as string) ?? "astro";
+  const outputMode: OutputMode = resolveOutputMode(framework, backend);
 
   switch (task.id) {
     // === Scaffold ===
     case "astro-init": {
-      const skipCloudflare = !state.answers["domain"] || state.answers["domain"] === "none";
-      const cfLines = skipCloudflare ? "" : `
-pnpm astro add cloudflare --yes`;
+      // astro-server needs Cloudflare adapter always (SSR). astro-static only if deploying.
+      const needsCloudflare = outputMode === "astro-server" || (state.answers["domain"] && state.answers["domain"] !== "none");
+      const cfLines = needsCloudflare ? `
+pnpm astro add cloudflare --yes` : "";
+      const astroOutput = outputMode === "astro-server" ? "'server'" : "'static'";
+      const cfImport = needsCloudflare ? `\nimport cloudflare from '@astrojs/cloudflare';` : "";
+      const cfAdapter = needsCloudflare ? `\n  adapter: cloudflare(),` : "";
       return `Scaffold an Astro project in ${projectDir}:
 \`\`\`bash
 pnpm create astro@latest ${slug} --template minimal --typescript strict --install --no-git --skip-houston
@@ -29,14 +36,14 @@ pnpm approve-builds workerd msw 2>/dev/null || true
 pnpm install
 \`\`\`
 
-Then configure astro.config.mjs for STATIC generation:
+Then configure astro.config.mjs:
 \`\`\`javascript
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
-import tailwindcss from '@tailwindcss/vite';
+import tailwindcss from '@tailwindcss/vite';${cfImport}
 
 export default defineConfig({
-  output: 'static',
+  output: ${astroOutput},${cfAdapter}
   integrations: [react()],
   vite: { plugins: [tailwindcss()] }
 });
@@ -60,9 +67,16 @@ Create directory structure:
 mkdir -p src/components/ui src/components/sections src/layouts src/pages src/styles
 \`\`\`
 
+Create src/styles/global.css (Tailwind v4 CSS entry point):
+\`\`\`css
+@import "tailwindcss";
+\`\`\`
+
 Create src/layouts/BaseLayout.astro:
 \`\`\`astro
 ---
+import '../styles/global.css';
+
 interface Props { title: string; description?: string; }
 const { title, description } = Astro.props;
 ---
@@ -81,6 +95,19 @@ const { title, description } = Astro.props;
 </body>
 </html>
 \`\`\`
+
+=== MODE RULES (${outputMode}) ===
+${outputMode === "astro-static" ? `This is STATIC generation (SSG). output: 'static'.
+- All pages pre-rendered at build time to dist/index.html + dist/_astro/
+- No server-side code, no API routes, no server middleware
+- Supabase calls happen client-side only (if any)
+- Do NOT add Cloudflare adapter unless deploying` : `This is SERVER rendering (SSR). output: 'server'.
+- Cloudflare adapter required — produces dist/_worker.js
+- Server-side routes allowed (src/pages/api/)
+- Auth/session logic runs server-side
+- import.meta.env for secrets (not PUBLIC_ prefix for server-only vars)`}
+Do NOT change the output mode. Do NOT add PostCSS config. Do NOT add tailwind.config.
+=== END MODE RULES ===
 
 Then: git init && git add -A && git commit -m "chore: scaffold"
 Report when done.`;
@@ -169,7 +196,7 @@ Include specific Tailwind classes for:
 Report when done.`;
 
     case "assemble-page": {
-      const isAstro = (state.answers["framework"] as string) === "astro";
+      const isAstro = outputMode !== "static";
       if (isAstro) {
         return `Read the page-spec from ${targetDir}/.orchestrator/specs/page-spec.json for section order.
 Create ${projectDir}/src/pages/index.astro that imports all section components from src/components/sections/ and renders them in order.
@@ -239,9 +266,28 @@ Edit files directly. Use Tailwind CSS. Add JS for scroll behaviors if needed.
 Report changes made.`;
 
     case "audit": {
-      const isAstro = (state.answers["framework"] as string) === "astro";
-      const astroChecks = isAstro ? `
-**Astro-specific:**
+      const isAstro = outputMode !== "static";
+      const modeChecks = outputMode === "static" ? `
+**Static HTML mode checks:**
+- Tailwind CDN script tag present in <head> (@tailwindcss/browser@4)
+- NO npm packages, NO node_modules, NO package.json references
+- NO build tool configs (vite.config, postcss.config, tailwind.config)
+- NO import statements in HTML files
+- All styling via Tailwind utility classes only
+- JavaScript only for interactivity (intersection observer, scroll)
+` : outputMode === "astro-server" ? `
+**Astro SSR mode checks:**
+- output: 'server' in astro.config.mjs
+- Cloudflare adapter configured
+- Server-side auth/session routes properly guarded
+- client:load only on interactive React components (not on every component)
+- Reusable UI components in src/components/ui/ (DRY)
+- Section components import from ui/
+- BaseLayout.astro used in pages
+- Props typed with interface
+- Build test: run \`pnpm build\` and verify dist/_worker.js exists
+` : `
+**Astro SSG mode checks:**
 - output: 'static' in astro.config.mjs (SSG, no server)
 - No unnecessary client:load directives (only for interactive React components)
 - Reusable UI components in src/components/ui/ (not duplicated inline)
@@ -250,8 +296,8 @@ Report changes made.`;
 - Props typed with interface
 - No inline <script> that could be an Astro component
 - Images use Astro <Image /> or proper loading="lazy"
-- Build test: run \`pnpm build\` and verify dist/ output is static HTML
-` : "";
+- Build test: run \`pnpm build\` and verify dist/index.html exists
+`;
       return `You are now acting as the impeccable audit skill.
 Read all ${isAstro ? ".astro" : "HTML"} files in ${projectDir}/src/.
 Read DESIGN.md and SHAPE.md for reference.
@@ -278,7 +324,7 @@ Perform technical quality checks:
 - Images: lazy loading (loading="lazy"), proper dimensions
 - No layout shift (explicit width/height or aspect-ratio)
 - Minimal JS (intersection observer only, no heavy libs)
-${astroChecks}
+${modeChecks}
 **Design fidelity:**
 - Compare each section against page-spec.json behaviors/effects
 - Flag any missing interactions or effects from the spec
@@ -288,13 +334,36 @@ Fix all issues found directly in the files. Report what was fixed.`;
     }
 
     // === Deploy ===
-    case "cf-build":
+    case "cf-build": {
+      if (outputMode === "static") {
+        // Pure static: no build step, just copy files
+        return `In ${projectDir}, prepare deploy:
+\`\`\`bash
+cd ${projectDir}
+mkdir -p dist
+cp src/index.html dist/index.html
+cp -r public/* dist/ 2>/dev/null || true
+\`\`\`
+No build step needed. The Tailwind CDN script compiles CSS in the browser.
+Do NOT install npm packages. Do NOT run any build command.
+Verify dist/index.html exists. Report when done.`;
+      }
+      if (outputMode === "astro-server") {
+        return `In ${projectDir}, run:
+\`\`\`bash
+cd ${projectDir}
+pnpm build
+\`\`\`
+Verify dist/_worker.js exists (SSR mode with Cloudflare adapter). Report when done.`;
+      }
+      // astro-static
       return `In ${projectDir}, run:
 \`\`\`bash
 cd ${projectDir}
 pnpm build
 \`\`\`
-Verify dist/_worker.js exists. Report when done.`;
+Verify dist/index.html exists (static generation). Report when done.`;
+    }
 
     case "cf-worker-create":
       return `Use cloudflare MCP to create a Worker named "${slug}". If it already exists, skip. Report when done.`;
@@ -317,7 +386,7 @@ Report when done.`;
       // craft-{section} tasks
       if (task.id.startsWith("craft-")) {
         const sectionId = task.id.replace("craft-", "");
-        const isAstro = (state.answers["framework"] as string) === "astro";
+        const isAstro = outputMode !== "static";
         const fileExt = isAstro ? "astro" : "html";
         const outputDir = isAstro ? "src/components/sections" : "src/sections";
         const outputPath = `${projectDir}/${outputDir}/${sectionId}.${fileExt}`;
@@ -403,23 +472,62 @@ For clip-path images:
 </div>
 \`\`\`
 
+=== MODE RULES (${outputMode}) ===
+${outputMode === "static" ? `STATIC HTML mode: pure .html file. Tailwind via CDN (already in page <head>).
+No npm, no imports, no build tools. Just HTML + Tailwind classes + vanilla JS.
+Do NOT add any <link> to CSS files. Do NOT reference node_modules.
+Do NOT use import statements. This is a plain HTML snippet.` : outputMode === "astro-server" ? `ASTRO SERVER mode: .astro component with SSR capability.
+Server-side code allowed in frontmatter. Can use Astro.cookies, server middleware.
+Auth/session logic can run server-side.` : `ASTRO STATIC mode: .astro component, pre-rendered at build time.
+No server-side runtime. All data must be available at build time or fetched client-side.
+Supabase calls (if any) happen client-side only.`}
+=== END MODE RULES ===
+
 Write the complete section ${fileExt}. Report when done.`;
       }
       if (task.id === "static-init") {
         return `Create a static HTML project in ${projectDir}:
 \`\`\`bash
 mkdir -p ${projectDir}/src/sections ${projectDir}/public
-cd ${projectDir}
-pnpm init -y
 \`\`\`
-Create src/index.html with Tailwind CDN (script tag: https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4).
+
+Create src/index.html with Tailwind CDN:
+\`\`\`html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="antialiased">
+  <!-- sections -->
+</body>
+</html>
+\`\`\`
+
+=== MODE RULES (static) ===
+This is PURE STATIC HTML mode. Zero npm. Zero build step.
+- Tailwind CSS via CDN script tag (@tailwindcss/browser@4) — this IS the production approach
+- All styling uses Tailwind utility classes in HTML
+- No package.json, no node_modules, no pnpm/npm/yarn
+- No Vite, no PostCSS, no webpack, no bundler of any kind
+- No tailwind.config, no postcss.config, no vite.config
+- No @tailwindcss/cli, no @tailwindcss/vite
+- No build step — the HTML files ARE the final output
+- Images use picsum.photos CDN URLs (seeded for consistency)
+- JavaScript only for interactivity (intersection observer, scroll behavior)
+- Deploy by copying src/index.html + public/ directly
+=== END MODE RULES ===
+
 Report when done.`;
       }
       return `Execute task "${task.id}": ${task.name}. Use Tailwind CSS for styling. Report when done.`;
   }
 }
 
-function slugFromState(state: RunState): string {
+export function slugFromState(state: RunState): string {
   const name = (state.answers["product-name"] as string) ?? "site";
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "site";
 }
