@@ -1,23 +1,44 @@
 import { loadState, saveState, getReadyTasks, markTaskComplete, markTaskFailed, type RunState, type Task } from "@orchestrator/shared";
-import { taskToPrompt } from "./executor.js";
+import type { TaskResult } from "./subagent.js";
+
+/**
+ * Simple async mutex to serialize state file writes.
+ * Parallel subagents complete at different times; each completion
+ * needs to read-modify-write state.json atomically.
+ */
+function createMutex() {
+  let chain = Promise.resolve();
+  return {
+    run<T>(fn: () => Promise<T>): Promise<T> {
+      const next = chain.then(fn, fn);
+      chain = next.then(() => {}, () => {});
+      return next;
+    }
+  };
+}
 
 export interface PipelineDriver {
-  sendMessage: (text: string) => void;
+  spawnTask: (task: Task, state: RunState) => Promise<TaskResult>;
   notify: (text: string, level: "info" | "error") => void;
+  onTaskStart: (taskId: string) => void;
+  onTaskEnd: (taskId: string, result: TaskResult) => void;
 }
 
 /**
- * Advances the pipeline by one step: picks ready tasks, sends prompts to LLM.
- * Returns task IDs that were dispatched. Extension calls this after each task completion.
- * 
- * Flow:
- * 1. Extension calls advancePipeline()
- * 2. Pipeline finds ready tasks, sends prompts via LLM
- * 3. LLM executes (shell, mcp, impeccable)
- * 4. LLM reports done → extension marks task complete → calls advancePipeline() again
- * 5. Repeat until no ready tasks
+ * Identifies impeccable-bound tasks for parallel throttling.
  */
-export async function advancePipeline(targetDir: string, driver: PipelineDriver): Promise<{ dispatched: string[]; done: boolean; failed: string[] }> {
+export function isImpeccableTask(id: string): boolean {
+  return id === "impeccable-shape" || id.startsWith("craft-") || id === "polish" || id === "audit";
+}
+
+/**
+ * Dispatch one batch of ready tasks as parallel subagents, await all completions.
+ * Returns dispatched task IDs. Caller (runPipeline) handles continuous loop.
+ */
+export async function advancePipeline(
+  targetDir: string,
+  driver: PipelineDriver
+): Promise<{ dispatched: string[]; done: boolean; failed: string[] }> {
   const state = await loadState(targetDir);
   const ready = getReadyTasks(state.tasks);
 
@@ -33,7 +54,6 @@ export async function advancePipeline(targetDir: string, driver: PipelineDriver)
   }
 
   // Enforce maxParallelImpeccable: cap concurrent impeccable-bound tasks
-  // Impeccable tasks = impeccable-shape, craft-*, polish, audit
   const maxParallel = state.config?.maxParallelImpeccable ?? 3;
   const runningImpeccable = state.tasks.filter(
     (t) => t.status === "running" && isImpeccableTask(t.id)
@@ -52,58 +72,73 @@ export async function advancePipeline(targetDir: string, driver: PipelineDriver)
   }
 
   // Mark dispatched tasks as running
-  state.tasks = state.tasks.map((t) => toDispatch.some((r) => r.id === t.id) ? { ...t, status: "running" as const } : t);
+  state.tasks = state.tasks.map((t) =>
+    toDispatch.some((r) => r.id === t.id) ? { ...t, status: "running" as const } : t
+  );
   await saveState(targetDir, state);
 
-  // Send prompts for dispatched tasks
-  const dispatched: string[] = [];
-  for (const task of toDispatch) {
-    const prompt = taskToPrompt(task, state, targetDir);
-    driver.sendMessage(`[Task: ${task.id}]\n\n${prompt}\n\nWhen done, call the orchestrator_task_done tool with taskId: "${task.id}"`);
-    dispatched.push(task.id);
-  }
-
+  const dispatched: string[] = toDispatch.map((t) => t.id);
   driver.notify(`Dispatched ${dispatched.length} task(s): ${dispatched.join(", ")}`, "info");
-  return { dispatched, done: false, failed: [] };
+
+  // Spawn all tasks in parallel, serialize state writes via mutex
+  const mutex = createMutex();
+  const promises = toDispatch.map(async (task) => {
+    driver.onTaskStart(task.id);
+    const result = await driver.spawnTask(task, state);
+    driver.onTaskEnd(task.id, result);
+
+    // Serialize state updates — parallel tasks must not corrupt state.json
+    await mutex.run(async () => {
+      const currentState = await loadState(targetDir);
+      if (result.status === "complete") {
+        currentState.tasks = markTaskComplete(currentState.tasks, task.id);
+      } else {
+        currentState.tasks = markTaskFailed(currentState.tasks, task.id, result.error ?? "unknown error");
+      }
+      currentState.phase = determinePhase(currentState);
+      await saveState(targetDir, currentState);
+    });
+
+    return result;
+  });
+
+  const results = await Promise.all(promises);
+  const failed = results.filter((r) => r.status === "failed").map((r) => r.taskId);
+
+  return { dispatched, done: false, failed };
 }
 
 /**
- * Mark a task complete and advance pipeline.
+ * Run full pipeline loop: dispatch batches continuously until done or stalled.
+ * Each batch dispatches ready tasks in parallel, waits for all to finish,
+ * then checks for newly-ready tasks.
  */
-export async function completeTask(targetDir: string, taskId: string, driver: PipelineDriver): Promise<void> {
-  const state = await loadState(targetDir);
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) {
-    driver.notify(`Task not found: ${taskId}`, "error");
-    return;
+export async function runPipeline(targetDir: string, driver: PipelineDriver): Promise<void> {
+  let iterations = 0;
+  const maxIterations = 50; // Safety valve
+
+  while (iterations < maxIterations) {
+    iterations++;
+    const { dispatched, done, failed } = await advancePipeline(targetDir, driver);
+
+    if (done) {
+      driver.notify("🎉 Pipeline complete!", "info");
+      return;
+    }
+
+    if (dispatched.length === 0 && failed.length > 0) {
+      driver.notify(`Pipeline stalled — ${failed.length} failed task(s): ${failed.join(", ")}`, "error");
+      return;
+    }
+
+    if (dispatched.length === 0) {
+      // No tasks ready, not done — waiting on running tasks (shouldn't happen in sync loop)
+      driver.notify("Pipeline waiting for running tasks...", "info");
+      return;
+    }
   }
 
-  state.tasks = markTaskComplete(state.tasks, taskId);
-
-  // Advance phase based on completed tasks
-  const phases = determinePhase(state);
-  state.phase = phases;
-
-  await saveState(targetDir, state);
-  driver.notify(`✓ ${taskId} complete`, "info");
-
-  // Auto-advance to next ready tasks
-  await advancePipeline(targetDir, driver);
-}
-
-/**
- * Mark a task failed.
- */
-export async function failTask(targetDir: string, taskId: string, error: string, driver: PipelineDriver): Promise<void> {
-  const state = await loadState(targetDir);
-  state.tasks = markTaskFailed(state.tasks, taskId, error);
-  state.phase = "failed";
-  await saveState(targetDir, state);
-  driver.notify(`❌ ${taskId} failed: ${error}`, "error");
-}
-
-export function isImpeccableTask(id: string): boolean {
-  return id === "impeccable-shape" || id.startsWith("craft-") || id === "polish" || id === "audit";
+  driver.notify("Pipeline safety limit reached", "error");
 }
 
 function determinePhase(state: RunState): RunState["phase"] {
@@ -111,6 +146,6 @@ function determinePhase(state: RunState): RunState["phase"] {
   if (ids.length === 0) return "done";
   if (ids.some((id) => id.startsWith("cf-"))) return "deploying";
   if (ids.some((id) => id.startsWith("craft-") || id === "impeccable-shape" || id === "polish" || id === "audit" || id === "assemble-page")) return "building";
-  if (ids.some((id) => id === "astro-init" || id === "shadcn-init" || id === "supabase-provision" || id === "write-context")) return "scaffolding";
+  if (ids.some((id) => id === "astro-init" || id === "static-init" || id === "shadcn-init" || id === "supabase-provision" || id === "write-context")) return "scaffolding";
   return state.phase;
 }
