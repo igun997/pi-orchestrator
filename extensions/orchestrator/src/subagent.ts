@@ -9,8 +9,8 @@ export interface SubagentOptions {
   model: any;
   modelRegistry: any;
   cwd: string;
-  impeccableSkillPath?: string;
-  onProgress?: (update: string) => void;
+  impeccableSkillPath?: string | undefined;
+  onProgress?: ((update: string) => void) | undefined;
 }
 
 export interface TaskResult {
