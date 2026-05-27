@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderProgressWidget, renderProgressStatus } from "./progress.js";
+import { renderProgressWidget, renderProgressStatus, progressWidgetFactory, computeStats } from "./progress.js";
 import type { Task } from "@orchestrator/shared";
 
 function task(id: string, status: Task["status"]): Task {
@@ -70,5 +70,43 @@ describe("progress", () => {
     expect(lines.length).toBeGreaterThan(2);
     const status = renderProgressStatus("extracting", []);
     expect(status).toBe("orchestrator: extracting");
+  });
+
+  it("computeStats returns correct counts", () => {
+    const tasks = [
+      task("a", "complete"),
+      task("b", "running"),
+      task("c", "pending"),
+      task("d", "failed"),
+      task("e", "skipped"),
+    ];
+    const stats = computeStats(tasks);
+    expect(stats.total).toBe(5);
+    expect(stats.complete).toBe(2); // complete + skipped
+    expect(stats.running).toBe(1);
+    expect(stats.pending).toBe(1);
+    expect(stats.failed).toBe(1);
+    expect(stats.pct).toBe(40);
+  });
+
+  it("progressWidgetFactory returns themed component", () => {
+    const tasks = [
+      task("a", "complete"),
+      task("b", "running"),
+    ];
+    const startTimes = new Map([["b", Date.now() - 30_000]]);
+    const factory = progressWidgetFactory("building", tasks, startTimes);
+
+    // Mock theme
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const component = factory(null, theme);
+    const lines = component.render();
+    expect(lines.length).toBeGreaterThan(3);
+    expect(lines.some((l: string) => l.includes("Orchestrator"))).toBe(true);
+    expect(lines.some((l: string) => l.includes("building"))).toBe(true);
+    expect(lines.some((l: string) => l.includes("0:30"))).toBe(true);
   });
 });

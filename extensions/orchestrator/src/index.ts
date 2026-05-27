@@ -7,7 +7,7 @@ import { verifyTasks } from "./verifier.js";
 import { slugFromState } from "./executor.js";
 import { runPipeline, type PipelineDriver } from "./pipeline.js";
 import { assembleTaskGraph, loadSectionsFromSpec } from "./assemble-graph.js";
-import { renderProgressWidget, renderProgressStatus } from "./progress.js";
+import { progressWidgetFactory, renderProgressStatus } from "./progress.js";
 import { hexToOklch, hexBatchToOklch } from "./color.js";
 import { mergeSections } from "./merge.js";
 import { spawnTaskAgent, type TaskResult } from "./subagent.js";
@@ -64,7 +64,7 @@ function createSubagentDriver(ctx: any, targetDir: string): PipelineDriver {
       const state = await loadState(targetDir);
       ctx.ui.setStatus("orchestrator", renderProgressStatus(state.phase, state.tasks));
       if (state.tasks.length > 0) {
-        ctx.ui.setWidget("orchestrator", renderProgressWidget(state.phase, state.tasks, startTimes));
+        ctx.ui.setWidget("orchestrator", progressWidgetFactory(state.phase, state.tasks, startTimes));
       }
     } catch { /* ignore if state not readable yet */ }
   };
