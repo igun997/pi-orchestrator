@@ -45,6 +45,26 @@ describe("progress", () => {
     expect(status).toContain("✗1");
   });
 
+  it("shows elapsed time for running tasks", () => {
+    const tasks = [
+      task("craft-hero", "running"),
+    ];
+    const startTimes = new Map([["craft-hero", Date.now() - 45_000]]);
+    const lines = renderProgressWidget("building", tasks, startTimes);
+    const joined = lines.join("\n");
+    expect(joined).toContain("0:45");
+  });
+
+  it("renders without startTimes (backward compatible)", () => {
+    const tasks = [
+      task("craft-hero", "running"),
+    ];
+    const lines = renderProgressWidget("building", tasks);
+    const joined = lines.join("\n");
+    expect(joined).toContain("craft hero");
+    expect(joined).not.toContain("0:");
+  });
+
   it("handles empty tasks", () => {
     const lines = renderProgressWidget("extracting", []);
     expect(lines.length).toBeGreaterThan(2);

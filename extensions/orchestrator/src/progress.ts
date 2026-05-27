@@ -4,7 +4,17 @@ import type { Task } from "@orchestrator/shared";
  * Renders a visual progress widget for the orchestrator pipeline.
  * Shows phase, task progress bar, and current/next tasks.
  */
-export function renderProgressWidget(phase: string, tasks: Task[]): string[] {
+/**
+ * Format milliseconds as m:ss.
+ */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
+}
+
+export function renderProgressWidget(phase: string, tasks: Task[], startTimes?: Map<string, number>): string[] {
   const total = tasks.length;
   const complete = tasks.filter((t) => t.status === "complete" || t.status === "skipped").length;
   const running = tasks.filter((t) => t.status === "running").length;
@@ -30,8 +40,12 @@ export function renderProgressWidget(phase: string, tasks: Task[]): string[] {
   if (runningTasks.length > 0) {
     lines.push(`│${"─".repeat(40)}│`);
     for (const t of runningTasks.slice(0, 3)) {
-      const name = t.name.length > 36 ? t.name.slice(0, 33) + "..." : t.name;
-      lines.push(`│ ▶ ${name.padEnd(37)}│`);
+      const started = startTimes?.get(t.id);
+      const timeStr = started ? formatElapsed(Date.now() - started) : "";
+      const nameWidth = timeStr ? 31 : 37;
+      const name = t.name.length > nameWidth ? t.name.slice(0, nameWidth - 3) + "..." : t.name;
+      const pad = timeStr ? `${name.padEnd(31)} ${timeStr.padStart(5)}` : name.padEnd(37);
+      lines.push(`│ ▶ ${pad}│`);
     }
     if (runningTasks.length > 3) {
       lines.push(`│   +${runningTasks.length - 3} more...${" ".repeat(28)}│`);
