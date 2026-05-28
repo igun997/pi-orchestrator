@@ -56,7 +56,7 @@ jobs:
 
       - name: Get version from package.json
         id: pkg
-        run: echo "version=$(node -p \"require('./extensions/orchestrator/package.json').version\")" >> $GITHUB_OUTPUT
+        run: echo "version=$(node -p 'require("./extensions/orchestrator/package.json").version')" >> $GITHUB_OUTPUT
 
       - name: Create release tag
         env:
