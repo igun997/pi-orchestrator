@@ -8,6 +8,7 @@ import { verifyProvider, verifyCloudflare } from "./credentials/verify.js";
 import { WorkspaceManager } from "./session/workspace.js";
 import { SessionManager as PiSessionManager } from "./session/manager.js";
 import { buildPersona } from "./persona.js";
+import { markdownToTelegramHTML, truncateForTelegram } from "./format.js";
 
 export interface BotDependencies {
   config: BotConfig;
@@ -459,15 +460,26 @@ export function createBot(deps: BotDependencies): Bot {
 
     const flushResponse = async () => {
       if (!responseBuffer.trim()) return;
-      const content = responseBuffer.slice(0, 4000);
+      const html = truncateForTelegram(markdownToTelegramHTML(responseBuffer));
       try {
         if (messageId) {
-          await ctx.api.editMessageText(ctx.chat!.id, messageId, content);
+          await ctx.api.editMessageText(ctx.chat!.id, messageId, html, { parse_mode: "HTML" });
         } else {
-          const sent = await ctx.reply(content);
+          const sent = await ctx.reply(html, { parse_mode: "HTML" });
           messageId = sent.message_id;
         }
-      } catch { /* edit race condition, ignore */ }
+      } catch {
+        // Fallback: send without formatting if HTML parse fails
+        try {
+          const plain = truncateForTelegram(responseBuffer);
+          if (messageId) {
+            await ctx.api.editMessageText(ctx.chat!.id, messageId, plain);
+          } else {
+            const sent = await ctx.reply(plain);
+            messageId = sent.message_id;
+          }
+        } catch { /* ignore */ }
+      }
     };
 
     // Subscribe to streaming events
