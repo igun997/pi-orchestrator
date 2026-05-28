@@ -6,7 +6,7 @@ import {
   type AgentSession,
   type CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import type { BotConfig } from "../config.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -60,37 +60,11 @@ export class SessionManager {
 
     const persona = buildPersona(this.config);
 
-    // Resolve orchestrator paths
-    const orchestratorRoot = resolve(import.meta.dirname, "../../../../");
-    const extensionPath = join(orchestratorRoot, "extensions/orchestrator/src/index.ts");
-
-    // External extensions (pi-memctx, pi-web-access)
     const agentDir = getAgentDir();
-    const memctxPath = join(agentDir, "npm/node_modules/pi-memctx/index.ts");
-    const webAccessPath = join(agentDir, "npm/node_modules/pi-web-access/index.ts");
-
-    const extensionPaths = [extensionPath, memctxPath, webAccessPath];
-
-    const skillPaths = [
-      join(orchestratorRoot, "skills/orchestrator-interview"),
-      join(orchestratorRoot, "skills/orchestrator-extract"),
-      join(orchestratorRoot, "skills/orchestrator-context"),
-      join(orchestratorRoot, "skills/orchestrator-scaffold"),
-      join(orchestratorRoot, "skills/orchestrator-build"),
-      join(orchestratorRoot, "skills/orchestrator-deploy"),
-      join(orchestratorRoot, "skills/impeccable"),
-      join(orchestratorRoot, "skills/motion-design"),
-      join(orchestratorRoot, "skills/design-engineering"),
-      join(orchestratorRoot, "skills/orchestrator-picsum"),
-      // pi-web-access skills
-      join(agentDir, "npm/node_modules/pi-web-access/skills"),
-    ];
 
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
-      additionalExtensionPaths: extensionPaths,
-      additionalSkillPaths: skillPaths,
       systemPrompt: persona.systemPrompt,
     });
 

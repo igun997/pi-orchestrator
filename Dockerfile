@@ -48,6 +48,21 @@ COPY . .
 # Build
 RUN pnpm build
 
+# Install packages into pi agent
+RUN pi install ./extensions/orchestrator && \
+    pi install ./skills/orchestrator-interview && \
+    pi install ./skills/orchestrator-extract && \
+    pi install ./skills/orchestrator-context && \
+    pi install ./skills/orchestrator-scaffold && \
+    pi install ./skills/orchestrator-build && \
+    pi install ./skills/orchestrator-deploy && \
+    pi install ./skills/orchestrator-picsum && \
+    pi install ./skills/impeccable && \
+    pi install ./skills/motion-design && \
+    pi install ./skills/design-engineering && \
+    pi install npm:pi-memctx && \
+    pi install npm:pi-web-access
+
 # Data volume
 VOLUME /data/pi-orchestrator
 
