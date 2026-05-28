@@ -29,11 +29,12 @@ export function createBot(deps: BotDependencies): Bot {
   bot.api.setMyCommands([
     { command: "start", description: "Welcome & status" },
     { command: "menu", description: "Interactive menu" },
+    { command: "new", description: "Start new site (orchestrator interview)" },
+    { command: "confirm", description: "Confirm & start building" },
     { command: "workspace", description: "Manage workspaces" },
     { command: "model", description: "Switch AI model" },
     { command: "status", description: "Current status" },
     { command: "deploy", description: "Deploy to Cloudflare" },
-    { command: "new", description: "Start new orchestrator run" },
   ]).catch(() => {});
 
   // --- Middleware: auth check ---
@@ -370,6 +371,165 @@ export function createBot(deps: BotDependencies): Bot {
     await ctx.reply(`🚀 Deploying <b>${active.name}</b> to Cloudflare Workers...`, { parse_mode: "HTML" });
     // TODO: integrate with pi session to run deploy skill
     await ctx.reply("⚠️ Deploy integration pending — will use MCP or wrangler CLI.");
+  });
+
+  // --- /confirm (trigger orchestrator pipeline after interview) ---
+  bot.command("confirm", async (ctx) => {
+    const userId = ctx.from!.id;
+    const ws = new WorkspaceManager(config.dataDir, userId);
+    const active = await ws.getActiveWorkspace();
+    if (!active) {
+      await ctx.reply("❌ No active workspace.");
+      return;
+    }
+
+    const { piSessions } = deps;
+    await piSessions.getOrCreate(userId);
+
+    await ctx.replyWithChatAction("typing");
+
+    // Tell the pi session to read the state and proceed with scaffolding+build+deploy
+    const confirmPrompt = [
+      `The orchestrator interview is complete and state.json is at phase "confirming".`,
+      `Read .orchestrator/state.json, update confirmed=true and phase="scaffolding".`,
+      `Then read .orchestrator/specs/design-system.json and .orchestrator/specs/page-spec.json.`,
+      `Based on the answers in state.json (framework, backend, sections), start building the site:`,
+      `1. If framework is "Static HTML": create index.html with Tailwind CDN, use the design-system colors/fonts.`,
+      `2. If framework is "Astro": scaffold Astro project with the design system.`,
+      `3. Build all sections from page-spec.json with the design system.`,
+      `4. Make sure the content is in the language specified in answers.language.`,
+      `Start building now. Do NOT ask more questions.`,
+    ].join("\n");
+
+    let responseBuffer = "";
+    let messageId: number | undefined;
+    let progressMessageId: number | undefined;
+    const progressMessages: number[] = [];
+    let flushed = false;
+
+    const flushResponse = async () => {
+      if (!responseBuffer.trim()) return;
+      const { markdownToTelegramHTML, truncateForTelegram } = await import("./format.js");
+      const html = truncateForTelegram(markdownToTelegramHTML(responseBuffer));
+      try {
+        if (messageId) {
+          await ctx.api.editMessageText(ctx.chat!.id, messageId, html, { parse_mode: "HTML" });
+        } else {
+          const sent = await ctx.reply(html, { parse_mode: "HTML" });
+          messageId = sent.message_id;
+        }
+      } catch {
+        try {
+          const plain = truncateForTelegram(responseBuffer);
+          if (messageId) await ctx.api.editMessageText(ctx.chat!.id, messageId, plain);
+          else { const sent = await ctx.reply(plain); messageId = sent.message_id; }
+        } catch { /* ignore */ }
+      }
+    };
+
+    const typingInterval = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
+
+    const unsubscribe = piSessions.subscribe(userId, {
+      onTextDelta: (delta) => { responseBuffer += delta; },
+      onToolStart: async (toolName) => {
+        try {
+          if (progressMessageId) {
+            await ctx.api.editMessageText(ctx.chat!.id, progressMessageId, `⏳ ${toolName}...`);
+          } else {
+            const sent = await ctx.reply(`⏳ ${toolName}...`);
+            progressMessageId = sent.message_id;
+            progressMessages.push(sent.message_id);
+          }
+        } catch { /* ignore */ }
+      },
+      onToolEnd: () => {},
+      onAgentEnd: async () => {
+        clearInterval(typingInterval);
+        for (const id of progressMessages) {
+          try { await ctx.api.deleteMessage(ctx.chat!.id, id); } catch { /* ignore */ }
+        }
+        if (!flushed) { flushed = true; await flushResponse(); }
+      },
+    });
+
+    try {
+      await piSessions.prompt(userId, confirmPrompt);
+      clearInterval(typingInterval);
+      for (const id of progressMessages) {
+        try { await ctx.api.deleteMessage(ctx.chat!.id, id); } catch { /* ignore */ }
+      }
+      if (!flushed) { flushed = true; await flushResponse(); }
+      if (!responseBuffer.trim()) await ctx.reply("✅ Build started.");
+    } catch (e) {
+      clearInterval(typingInterval);
+      await ctx.reply(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  // --- /new (start orchestrator interview) ---
+  bot.command("new", async (ctx) => {
+    const userId = ctx.from!.id;
+    const ws = new WorkspaceManager(config.dataDir, userId);
+    const active = await ws.getActiveWorkspace();
+    if (!active) {
+      await ctx.reply("📂 Create a workspace first:\n/workspace new <name>");
+      return;
+    }
+
+    const { piSessions } = deps;
+    piSessions.destroy(userId); // fresh session for new run
+    await piSessions.getOrCreate(userId);
+
+    await ctx.reply(`🚀 Starting new site in <b>${active.name}</b>...`, { parse_mode: "HTML" });
+
+    // Trigger the orchestrator interview
+    const startPrompt = "Start the orchestrator interview for a new website. Ask me questions one at a time. Start with the content language question.";
+
+    let responseBuffer = "";
+    let messageId: number | undefined;
+    let flushed = false;
+
+    const flushResponse = async () => {
+      if (!responseBuffer.trim()) return;
+      const { markdownToTelegramHTML, truncateForTelegram } = await import("./format.js");
+      const html = truncateForTelegram(markdownToTelegramHTML(responseBuffer));
+      try {
+        if (messageId) await ctx.api.editMessageText(ctx.chat!.id, messageId, html, { parse_mode: "HTML" });
+        else { const sent = await ctx.reply(html, { parse_mode: "HTML" }); messageId = sent.message_id; }
+      } catch {
+        try {
+          const plain = truncateForTelegram(responseBuffer);
+          if (messageId) await ctx.api.editMessageText(ctx.chat!.id, messageId, plain);
+          else { const sent = await ctx.reply(plain); messageId = sent.message_id; }
+        } catch { /* ignore */ }
+      }
+    };
+
+    const typingInterval = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
+    await ctx.replyWithChatAction("typing");
+
+    const unsubscribe = piSessions.subscribe(userId, {
+      onTextDelta: (delta) => { responseBuffer += delta; },
+      onToolStart: () => {},
+      onToolEnd: () => {},
+      onAgentEnd: async () => {
+        clearInterval(typingInterval);
+        if (!flushed) { flushed = true; await flushResponse(); }
+      },
+    });
+
+    try {
+      await piSessions.prompt(userId, startPrompt);
+      clearInterval(typingInterval);
+      if (!flushed) { flushed = true; await flushResponse(); }
+    } catch (e) {
+      clearInterval(typingInterval);
+      await ctx.reply(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      unsubscribe();
+    }
   });
 
   // --- Callback queries ---
