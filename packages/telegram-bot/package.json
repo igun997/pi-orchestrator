@@ -1,0 +1,26 @@
+{
+  "name": "@orchestrator/telegram-bot",
+  "version": "0.2.0",
+  "type": "module",
+  "bin": {
+    "orchestrator-bot": "./dist/entrypoint.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/entrypoint.ts",
+    "start": "node dist/entrypoint.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.76.0",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@orchestrator/shared": "workspace:*",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
