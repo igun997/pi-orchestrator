@@ -1,4 +1,4 @@
-import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet, resolveOutputMode } from "@orchestrator/shared";
+import { REQUIRED_MCPS, findMissingMcps, loadState, saveState, renderMcpSnippet, resolveOutputMode, autoRegisterMcps, ORCHESTRATOR_MCPS } from "@orchestrator/shared";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseStartArgs } from "./args.js";
@@ -283,11 +283,41 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("orchestrator:doctor", {
-    description: "Show required MCP bootstrap guidance",
+    description: "Auto-register required MCP servers and verify connectivity",
     handler: async (_args, ctx) => {
-      const missing = findMissingMcps([], REQUIRED_MCPS);
-      const message = [`Required MCPs: ${REQUIRED_MCPS.join(", ")}`, "", renderMcpSnippet(missing)].join("\n");
-      ctx.ui.notify(message, "info");
+      ctx.ui.notify("🔍 Checking MCP servers...", "info");
+
+      // Auto-register missing MCPs
+      const { registered, alreadyPresent } = await autoRegisterMcps();
+
+      const lines: string[] = [];
+
+      if (registered.length > 0) {
+        lines.push(`✅ Registered ${registered.length} new MCP server(s): ${registered.join(", ")}`);
+      }
+      if (alreadyPresent.length > 0) {
+        lines.push(`✓ Already configured: ${alreadyPresent.join(", ")}`);
+      }
+
+      // Check which are available in current session
+      const activeTools = pi.getActiveTools();
+      lines.push("", "Current session status:");
+      for (const mcp of ORCHESTRATOR_MCPS) {
+        const hasTools = activeTools.some((t) => t.toLowerCase().includes(mcp.name.replace("-", "")));
+        if (hasTools) {
+          lines.push(`  ✅ ${mcp.displayName} (${mcp.name}) — active`);
+        } else if (registered.includes(mcp.name)) {
+          lines.push(`  🔄 ${mcp.displayName} (${mcp.name}) — just registered, restart to activate`);
+        } else {
+          lines.push(`  ⚠️  ${mcp.displayName} (${mcp.name}) — registered but not active (restart pi)`);
+        }
+      }
+
+      if (registered.length > 0) {
+        lines.push("", "💡 Restart pi session to activate newly registered MCPs.");
+      }
+
+      ctx.ui.notify(lines.join("\n"), "info");
     }
   });
 

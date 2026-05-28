@@ -6,3 +6,4 @@ export * from "./mcp-check.js";
 export * from "./retry.js";
 export * from "./logging.js";
 export * from "./presets/index.js";
+export * from "./mcp-register.js";
