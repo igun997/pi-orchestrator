@@ -14,6 +14,34 @@ A conversation-first website builder powered by [pi](https://github.com/earendil
 
 ## Quick Start (Docker)
 
+> 📖 **Full guide**: [docs/GUIDE.md](docs/GUIDE.md)
+
+### From GHCR (recommended)
+
+```bash
+docker pull ghcr.io/igun997/pi-orchestrator:latest
+```
+
+Or use `docker-compose.yml`:
+
+```yaml
+services:
+  orchestrator-bot:
+    image: ghcr.io/igun997/pi-orchestrator:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot-data:/data/pi-orchestrator
+    environment:
+      - DATA_DIR=/data/pi-orchestrator
+      - NODE_ENV=production
+
+volumes:
+  bot-data:
+```
+
+### From source
+
 ```bash
 # Clone
 git clone git@github.com:igun997/pi-orchestrator.git
