@@ -9,6 +9,7 @@ export interface BotConfig {
   personaPrompt: string;
   piModel?: string | undefined;
   toolVerbosity: "all" | "summary" | "errors-only" | "none";
+  debug: boolean;
 }
 
 export function loadConfig(): BotConfig {
@@ -37,6 +38,7 @@ export function loadConfig(): BotConfig {
     personaPrompt,
     piModel,
     toolVerbosity,
+    debug: process.env["DEBUG"] === "true" || process.env["DEBUG"] === "1",
   };
 }
 

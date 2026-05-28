@@ -484,6 +484,27 @@ export function createBot(deps: BotDependencies): Bot {
 
     // Subscribe to streaming events
     let flushed = false;
+    let progressMessageId: number | undefined;
+    const progressMessages: number[] = [];
+
+    const showProgress = async (text: string) => {
+      try {
+        if (progressMessageId) {
+          await ctx.api.editMessageText(ctx.chat!.id, progressMessageId, `⏳ ${text}`);
+        } else {
+          const sent = await ctx.reply(`⏳ ${text}`);
+          progressMessageId = sent.message_id;
+          progressMessages.push(sent.message_id);
+        }
+      } catch { /* ignore */ }
+    };
+
+    const deleteProgressMessages = async () => {
+      for (const msgId of progressMessages) {
+        try { await ctx.api.deleteMessage(ctx.chat!.id, msgId); } catch { /* ignore */ }
+      }
+    };
+
     const unsubscribe = piSessions.subscribe(userId, {
       onTextDelta: (delta) => {
         responseBuffer += delta;
@@ -492,12 +513,14 @@ export function createBot(deps: BotDependencies): Bot {
       },
       onToolStart: (toolName) => {
         ctx.replyWithChatAction("typing").catch(() => {});
+        showProgress(`Running: ${toolName}...`);
       },
       onToolEnd: () => {},
-      onAgentEnd: () => {
+      onAgentEnd: async () => {
         clearInterval(typingInterval);
         if (debounceTimer) clearTimeout(debounceTimer);
-        if (!flushed) { flushed = true; flushResponse(); }
+        await deleteProgressMessages();
+        if (!flushed) { flushed = true; await flushResponse(); }
       },
     });
 

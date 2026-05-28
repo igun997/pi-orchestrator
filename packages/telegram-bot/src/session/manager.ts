@@ -41,6 +41,10 @@ export class SessionManager {
     this.credentials = credentials;
   }
 
+  private log(...args: any[]): void {
+    if (this.config.debug) console.log("[pi-session]", ...args);
+  }
+
   /**
    * Get or create a pi session for a telegram user.
    */
@@ -59,6 +63,14 @@ export class SessionManager {
     // Resolve orchestrator paths
     const orchestratorRoot = resolve(import.meta.dirname, "../../../../");
     const extensionPath = join(orchestratorRoot, "extensions/orchestrator/src/index.ts");
+
+    // External extensions (pi-memctx, pi-web-access)
+    const agentDir = getAgentDir();
+    const memctxPath = join(agentDir, "npm/node_modules/pi-memctx/index.ts");
+    const webAccessPath = join(agentDir, "npm/node_modules/pi-web-access/index.ts");
+
+    const extensionPaths = [extensionPath, memctxPath, webAccessPath];
+
     const skillPaths = [
       join(orchestratorRoot, "skills/orchestrator-interview"),
       join(orchestratorRoot, "skills/orchestrator-extract"),
@@ -70,12 +82,14 @@ export class SessionManager {
       join(orchestratorRoot, "skills/motion-design"),
       join(orchestratorRoot, "skills/design-engineering"),
       join(orchestratorRoot, "skills/orchestrator-picsum"),
+      // pi-web-access skills
+      join(agentDir, "npm/node_modules/pi-web-access/skills"),
     ];
 
     const resourceLoader = new DefaultResourceLoader({
       cwd,
-      agentDir: getAgentDir(),
-      additionalExtensionPaths: [extensionPath],
+      agentDir,
+      additionalExtensionPaths: extensionPaths,
       additionalSkillPaths: skillPaths,
       systemPrompt: persona.systemPrompt,
     });
@@ -111,6 +125,7 @@ export class SessionManager {
 
     const unsubscribe = userSession.session.subscribe((event) => {
       const e = event as any;
+      this.log(`event: ${event.type}`, e.toolName ?? e.assistantMessageEvent?.type ?? "");
       if (event.type === "message_update") {
         const ame = e.assistantMessageEvent;
         if (ame) {
@@ -136,7 +151,9 @@ export class SessionManager {
    */
   async prompt(telegramId: number, text: string, images?: any[]): Promise<void> {
     const userSession = await this.getOrCreate(telegramId);
+    this.log(`prompt: "${text.slice(0, 80)}"`);
     await userSession.session.prompt(text, images ? { images } : undefined);
+    this.log("prompt complete");
   }
 
   /**
