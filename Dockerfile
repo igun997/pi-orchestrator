@@ -1,11 +1,16 @@
 FROM node:22-slim
 
-# Install system deps for pi (git, build tools)
+# Install system deps for pi (git, build tools, network utils)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    wget \
     build-essential \
     python3 \
+    ca-certificates \
+    openssh-client \
+    jq \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pnpm

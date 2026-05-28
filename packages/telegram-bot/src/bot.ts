@@ -25,6 +25,17 @@ export function createBot(deps: BotDependencies): Bot {
   // Auto-retry on rate limits
   bot.api.config.use(autoRetry());
 
+  // Register slash commands with Telegram
+  bot.api.setMyCommands([
+    { command: "start", description: "Welcome & status" },
+    { command: "menu", description: "Interactive menu" },
+    { command: "workspace", description: "Manage workspaces" },
+    { command: "model", description: "Switch AI model" },
+    { command: "status", description: "Current status" },
+    { command: "deploy", description: "Deploy to Cloudflare" },
+    { command: "new", description: "Start new orchestrator run" },
+  ]).catch(() => {});
+
   // --- Middleware: auth check ---
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
@@ -393,32 +404,116 @@ export function createBot(deps: BotDependencies): Bot {
     if (data.startsWith("menu:")) {
       const action = data.slice("menu:".length);
       await ctx.answerCallbackQuery();
+      const userId = ctx.from!.id;
       switch (action) {
-        case "new":
-          await ctx.reply("Tell me what you want to build, or use /workspace to select a workspace first.");
+        case "new": {
+          const ws = new WorkspaceManager(config.dataDir, userId);
+          const active = await ws.getActiveWorkspace();
+          if (!active) {
+            await ctx.editMessageText("📂 No workspace. Create one first:", {
+              reply_markup: new InlineKeyboard().text("➕ New Workspace", "menu:new_ws"),
+            });
+          } else {
+            await ctx.editMessageText(`🚀 Active: <b>${active.name}</b>\n\nTell me what you want to build!`, { parse_mode: "HTML" });
+          }
           break;
-        case "workspace":
-          await ctx.reply("Use /workspace to manage workspaces.");
+        }
+        case "new_ws": {
+          await ctx.editMessageText("📂 Send workspace name (e.g. <code>my-site</code>):", { parse_mode: "HTML" });
           break;
-        case "status":
-          await ctx.reply("Use /status to see current state.");
+        }
+        case "workspace": {
+          const ws = new WorkspaceManager(config.dataDir, userId);
+          const workspaces = await ws.listWorkspaces();
+          const active = await ws.getActiveWorkspace();
+          if (workspaces.length === 0) {
+            await ctx.editMessageText("📂 No workspaces yet.", {
+              reply_markup: new InlineKeyboard().text("➕ Create New", "menu:new_ws"),
+            });
+          } else {
+            const kb = new InlineKeyboard();
+            for (const w of workspaces) {
+              const label = w.name === active?.name ? `✓ ${w.name}` : w.name;
+              kb.text(label, `ws:switch:${w.name}`).row();
+            }
+            kb.text("➕ Create New", "menu:new_ws").row();
+            await ctx.editMessageText("📂 Your workspaces:", { reply_markup: kb });
+          }
           break;
-        case "model":
-          await ctx.reply("Use /model to switch models.");
+        }
+        case "status": {
+          const ws = new WorkspaceManager(config.dataDir, userId);
+          const active = await ws.getActiveWorkspace();
+          const modelConfig = await credentials.getModelConfig();
+          await ctx.editMessageText(
+            [
+              `📊 <b>Status</b>`,
+              ``,
+              `📂 Workspace: ${active ? `<b>${active.name}</b>` : "<i>none</i>"}`,
+              `🤖 Model: <code>${modelConfig.default || "not set"}</code>`,
+              `🎭 Persona: ${persona.name}`,
+            ].join("\n"),
+            { parse_mode: "HTML" }
+          );
           break;
-        case "deploy":
-          await ctx.reply("Use /deploy to deploy current project.");
+        }
+        case "model": {
+          const modelConfig = await credentials.getModelConfig();
+          if (modelConfig.enabled.length === 0) {
+            await ctx.editMessageText("⚠️ No models configured. Admin: /setup provider first.");
+          } else {
+            const kb = new InlineKeyboard();
+            for (const m of modelConfig.enabled) {
+              const label = m === modelConfig.default ? `✓ ${m}` : m;
+              kb.text(label, `model:select:${m}`).row();
+            }
+            await ctx.editMessageText("🔄 Select model:", { reply_markup: kb });
+          }
           break;
-        case "sessions":
-          await ctx.reply("Use /sessions to manage sessions.");
+        }
+        case "deploy": {
+          const ws = new WorkspaceManager(config.dataDir, userId);
+          const active = await ws.getActiveWorkspace();
+          if (!active) {
+            await ctx.editMessageText("❌ No active workspace.");
+          } else {
+            const deployCreds = await credentials.getDeployCredentials();
+            if (!deployCreds) {
+              await ctx.editMessageText("❌ Cloudflare not configured. Admin: /setup cloudflare");
+            } else {
+              await ctx.editMessageText(`🚀 Deploying <b>${active.name}</b>...`, { parse_mode: "HTML" });
+              // TODO: trigger deploy via pi session
+            }
+          }
           break;
-        case "setup":
-          await ctx.reply("Use /setup to configure providers.");
+        }
+        case "sessions": {
+          await ctx.editMessageText("💬 Session management coming soon.");
           break;
-        case "users":
+        }
+        case "setup": {
+          await ctx.editMessageText(
+            [
+              "⚙️ <b>Setup:</b>",
+              "",
+              "<code>/setup provider &lt;name&gt; &lt;key&gt;</code>",
+              "<code>/setup cloudflare &lt;token&gt; &lt;id&gt;</code>",
+              "<code>/setup remove &lt;provider&gt;</code>",
+            ].join("\n"),
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+        case "users": {
           const users = allowlist.getUsers();
-          await ctx.reply(users.length > 0 ? `👥 Allowed users:\n${users.map((u) => `• <code>${u}</code>`).join("\n")}` : "No users added yet.", { parse_mode: "HTML" });
+          await ctx.editMessageText(
+            users.length > 0
+              ? `👥 Allowed users:\n${users.map((u) => `• <code>${u}</code>`).join("\n")}`
+              : "No users added yet.",
+            { parse_mode: "HTML" }
+          );
           break;
+        }
       }
       return;
     }

@@ -107,6 +107,9 @@ export class SessionManager {
       authStorage,
     });
 
+    // Patch bash tool with default timeout (120s)
+    patchBashTimeout(session);
+
     const userSession: UserSession = { session, workspace: ws };
     this.sessions.set(telegramId, userSession);
     return userSession;
@@ -183,4 +186,33 @@ export class SessionManager {
     await this.getOrCreate(telegramId);
     return true;
   }
+}
+
+const DEFAULT_BASH_TIMEOUT_SECONDS = 120;
+
+function patchBashTimeout(session: AgentSession): void {
+  const tools = (session as any).agent.state.tools;
+  const patched = tools.map((tool: any) => {
+    if (tool.name !== "bash") return tool;
+
+    const originalExecute = tool.execute;
+    const execute = (toolCallId: string, params: any, signal: any, onUpdate: any) =>
+      originalExecute(toolCallId, withDefaultBashTimeout(params), signal, onUpdate);
+
+    return {
+      ...tool,
+      description: tool.description + ` Commands time out after ${DEFAULT_BASH_TIMEOUT_SECONDS}s by default. Pass a longer timeout for slow commands.`,
+      execute,
+    };
+  });
+  (session as any).agent.state.tools = patched;
+}
+
+function withDefaultBashTimeout<T>(params: T): T {
+  if (typeof params !== "object" || params === null || !("command" in params)) return params;
+  const p = params as any;
+  if (p.timeout === undefined || p.timeout === null) {
+    return { ...params, timeout: DEFAULT_BASH_TIMEOUT_SECONDS };
+  }
+  return params;
 }
