@@ -2,6 +2,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  AuthStorage,
   type AgentSession,
   type CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent";
@@ -10,6 +11,7 @@ import { join, resolve } from "node:path";
 import type { BotConfig } from "../config.js";
 import { WorkspaceManager } from "./workspace.js";
 import { buildPersona } from "../persona.js";
+import type { CredentialStore } from "../credentials/store.js";
 
 export interface SessionCallbacks {
   onTextDelta: (delta: string) => void;
@@ -32,9 +34,11 @@ export interface UserSession {
 export class SessionManager {
   private sessions = new Map<number, UserSession>();
   private config: BotConfig;
+  private credentials: CredentialStore;
 
-  constructor(config: BotConfig) {
+  constructor(config: BotConfig, credentials: CredentialStore) {
     this.config = config;
+    this.credentials = credentials;
   }
 
   /**
@@ -76,9 +80,17 @@ export class SessionManager {
       systemPrompt: persona.systemPrompt,
     });
 
+    // Create AuthStorage and inject API keys from credential store
+    const authStorage = AuthStorage.create(join(getAgentDir(), "auth.json"));
+    const providers = await this.credentials.getProviders();
+    for (const provider of providers) {
+      authStorage.setRuntimeApiKey(provider.name, provider.apiKey);
+    }
+
     const { session } = await createAgentSession({
       cwd,
       resourceLoader,
+      authStorage,
     });
 
     const userSession: UserSession = { session, workspace: ws };

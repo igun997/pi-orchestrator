@@ -5,11 +5,9 @@ services:
     env_file: .env
     volumes:
       - bot-data:/data/pi-orchestrator
-      - pi-agent:/root/.pi/agent
     environment:
       - DATA_DIR=/data/pi-orchestrator
       - NODE_ENV=production
 
 volumes:
   bot-data:
-  pi-agent:

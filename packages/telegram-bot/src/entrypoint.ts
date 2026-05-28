@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const credentials = new CredentialStore(config.dataDir, config.telegramBotToken, config.telegramAdminId);
 
   // Init pi session manager
-  const piSessions = new PiSessionManager(config);
+  const piSessions = new PiSessionManager(config, credentials);
 
   // Create and start bot
   const bot = createBot({ config, allowlist, credentials, piSessions });

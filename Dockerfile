@@ -21,11 +21,18 @@ RUN npm install -g wrangler
 WORKDIR /app
 
 # Copy package files
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/telegram-bot/package.json packages/telegram-bot/
 COPY extensions/orchestrator/package.json extensions/orchestrator/
 COPY skills/orchestrator-interview/package.json skills/orchestrator-interview/
+COPY skills/orchestrator-extract/package.json skills/orchestrator-extract/
+COPY skills/orchestrator-context/package.json skills/orchestrator-context/
+COPY skills/orchestrator-scaffold/package.json skills/orchestrator-scaffold/
+COPY skills/orchestrator-build/package.json skills/orchestrator-build/
+COPY skills/orchestrator-deploy/package.json skills/orchestrator-deploy/
+COPY skills/motion-design/package.json skills/motion-design/
+COPY skills/design-engineering/package.json skills/design-engineering/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
