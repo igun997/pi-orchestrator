@@ -9,3 +9,4 @@ coverage/
 !.env.example
 .orchestrator/
 .DS_Store
+packages/telegram-bot/data/
