@@ -3,7 +3,7 @@ import { REQUIRED_MCPS, OPTIONAL_MCPS, findMissingMcps, renderMcpSnippet } from 
 
 describe("mcp-check", () => {
   it("lists required MCP server names", () => {
-    expect(REQUIRED_MCPS).toEqual(["shadcn"]);
+    expect(REQUIRED_MCPS).toEqual(["shadcn", "astro-docs"]);
   });
 
   it("lists optional MCP server names", () => {
@@ -11,7 +11,7 @@ describe("mcp-check", () => {
   });
 
   it("finds required MCP servers that are not available", () => {
-    expect(findMissingMcps(["cloudflare", "supabase"], REQUIRED_MCPS)).toEqual(["shadcn"]);
+    expect(findMissingMcps(["cloudflare", "supabase"], REQUIRED_MCPS)).toEqual(["shadcn", "astro-docs"]);
   });
 
   it("renders correct bootstrap snippet", () => {
