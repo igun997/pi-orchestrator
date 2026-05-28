@@ -31,10 +31,12 @@ export function createBot(deps: BotDependencies): Bot {
     { command: "menu", description: "Interactive menu" },
     { command: "new", description: "Start new site (orchestrator interview)" },
     { command: "confirm", description: "Confirm & start building" },
+    { command: "deploy", description: "Deploy to Cloudflare" },
+    { command: "status", description: "Current status" },
+    { command: "reset", description: "Wipe orchestrator state & start fresh" },
+    { command: "stop", description: "Abort running session" },
     { command: "workspace", description: "Manage workspaces" },
     { command: "model", description: "Switch AI model" },
-    { command: "status", description: "Current status" },
-    { command: "deploy", description: "Deploy to Cloudflare" },
   ]).catch(() => {});
 
   // --- Middleware: auth check ---
@@ -340,15 +342,73 @@ export function createBot(deps: BotDependencies): Bot {
     const active = await ws.getActiveWorkspace();
     const modelConfig = await credentials.getModelConfig();
 
+    // Check orchestrator state
+    let orchestratorInfo = "<i>not started</i>";
+    if (active) {
+      try {
+        const { readFile } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const stateFile = join(active.path, ".orchestrator", "state.json");
+        const raw = await readFile(stateFile, "utf8");
+        const state = JSON.parse(raw);
+        const phase = state.phase || "unknown";
+        const siteName = state.answers?.siteName || state.answers?.brandName || "";
+        const tasksDone = state.tasks?.filter((t: any) => t.status === "done").length ?? 0;
+        const tasksTotal = state.tasks?.length ?? 0;
+        orchestratorInfo = `<b>${phase}</b>`;
+        if (siteName) orchestratorInfo += ` — ${siteName}`;
+        if (tasksTotal > 0) orchestratorInfo += ` (${tasksDone}/${tasksTotal} tasks)`;
+      } catch { /* no state file */ }
+    }
+
+    const hasSession = deps.piSessions.has(userId);
+
     const lines = [
       `📊 <b>Status</b>`,
       "",
       `📂 Workspace: ${active ? `<b>${active.name}</b>` : "<i>none</i>"}`,
       `🤖 Model: <code>${modelConfig.default || "not set"}</code>`,
       `🎭 Persona: ${persona.name}`,
+      `🛠 Orchestrator: ${orchestratorInfo}`,
+      `💬 Session: ${hasSession ? "✅ active" : "❌ none"}`,
     ];
 
     await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+  });
+
+  // --- /reset (wipe orchestrator state + destroy session) ---
+  bot.command("reset", async (ctx) => {
+    const userId = ctx.from!.id;
+    const ws = new WorkspaceManager(config.dataDir, userId);
+    const active = await ws.getActiveWorkspace();
+
+    if (!active) {
+      await ctx.reply("❌ No active workspace.");
+      return;
+    }
+
+    const { rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const orchestratorDir = join(active.path, ".orchestrator");
+
+    try {
+      await rm(orchestratorDir, { recursive: true, force: true });
+    } catch { /* dir may not exist */ }
+
+    deps.piSessions.destroy(userId);
+    await ctx.reply(`🗑 Reset <b>${active.name}</b> — orchestrator state wiped, session destroyed.\nUse /new to start fresh.`, { parse_mode: "HTML" });
+  });
+
+  // --- /stop (abort running pi session) ---
+  bot.command("stop", async (ctx) => {
+    const userId = ctx.from!.id;
+    const has = deps.piSessions.has(userId);
+    if (!has) {
+      await ctx.reply("❌ No active session.");
+      return;
+    }
+    deps.piSessions.destroy(userId);
+    await ctx.reply("⏹ Session stopped.");
   });
 
   // --- /deploy ---

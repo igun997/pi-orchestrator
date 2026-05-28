@@ -134,6 +134,13 @@ export class SessionManager {
   }
 
   /**
+   * Check if user has an active session.
+   */
+  has(telegramId: number): boolean {
+    return this.sessions.has(telegramId);
+  }
+
+  /**
    * Destroy a user's session.
    */
   destroy(telegramId: number): void {

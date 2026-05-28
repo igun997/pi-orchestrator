@@ -66,5 +66,9 @@ RUN pi install ./extensions/orchestrator && \
 # Data volume
 VOLUME /data/pi-orchestrator
 
+# Healthcheck — verify node process is alive
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD node -e "process.exit(0)" || exit 1
+
 # Run bot with tsx (pi extensions are TypeScript)
 CMD ["npx", "tsx", "packages/telegram-bot/src/entrypoint.ts"]
