@@ -40,6 +40,10 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
 
+  skills/design-engineering: {}
+
+  skills/motion-design: {}
+
   skills/orchestrator-build:
     dependencies:
       '@orchestrator/shared':
