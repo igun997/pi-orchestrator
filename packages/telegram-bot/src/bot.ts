@@ -490,7 +490,9 @@ export function createBot(deps: BotDependencies): Bot {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(flushResponse, DEBOUNCE_MS);
       },
-      onToolStart: () => {},
+      onToolStart: (toolName) => {
+        ctx.replyWithChatAction("typing").catch(() => {});
+      },
       onToolEnd: () => {},
       onAgentEnd: () => {
         clearInterval(typingInterval);
