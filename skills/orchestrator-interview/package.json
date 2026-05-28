@@ -1,0 +1,16 @@
+{
+  "name": "@orchestrator/skill-interview",
+  "version": "0.1.0",
+  "type": "module",
+  "pi": {
+    "skills": ["./SKILL.md"]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@orchestrator/shared": "workspace:*"
+  }
+}
