@@ -51,5 +51,5 @@ RUN pnpm build
 # Data volume
 VOLUME /data/pi-orchestrator
 
-# Run bot
-CMD ["node", "packages/telegram-bot/dist/entrypoint.js"]
+# Run bot with tsx (pi extensions are TypeScript)
+CMD ["npx", "tsx", "packages/telegram-bot/src/entrypoint.ts"]
