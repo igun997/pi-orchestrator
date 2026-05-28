@@ -368,9 +368,96 @@ export function createBot(deps: BotDependencies): Bot {
       return;
     }
 
-    await ctx.reply(`🚀 Deploying <b>${active.name}</b> to Cloudflare Workers...`, { parse_mode: "HTML" });
-    // TODO: integrate with pi session to run deploy skill
-    await ctx.reply("⚠️ Deploy integration pending — will use MCP or wrangler CLI.");
+    const { piSessions } = deps;
+    await piSessions.getOrCreate(userId);
+
+    await ctx.replyWithChatAction("typing");
+
+    const deployPrompt = [
+      `Deploy the current project in this workspace to Cloudflare Workers.`,
+      `Cloudflare credentials are available as environment variables:`,
+      `  CLOUDFLARE_API_TOKEN=${deployCreds.apiToken}`,
+      `  CLOUDFLARE_ACCOUNT_ID=${deployCreds.accountId}`,
+      ``,
+      `Steps:`,
+      `1. Check if there's a built project (look for dist/, index.html, or wrangler.toml).`,
+      `2. If no wrangler.toml exists, create one with:`,
+      `   name = "${active.name}"`,
+      `   main = "dist/_worker.js" (for Astro) or "index.html" (for static)`,
+      `   compatibility_date = "2024-01-01"`,
+      `   [assets]`,
+      `   directory = "dist" (or "." for static HTML)`,
+      `3. Run: CLOUDFLARE_API_TOKEN=${deployCreds.apiToken} CLOUDFLARE_ACCOUNT_ID=${deployCreds.accountId} npx wrangler deploy`,
+      `4. Report the deployed URL back.`,
+      ``,
+      `If the project hasn't been built yet, build it first (pnpm build for Astro, or skip for static HTML).`,
+    ].join("\n");
+
+    let responseBuffer = "";
+    let messageId: number | undefined;
+    let progressMessageId: number | undefined;
+    const progressMessages: number[] = [];
+    let flushed = false;
+
+    const flushResponse = async () => {
+      if (!responseBuffer.trim()) return;
+      const { markdownToTelegramHTML, truncateForTelegram } = await import("./format.js");
+      const html = truncateForTelegram(markdownToTelegramHTML(responseBuffer));
+      try {
+        if (messageId) {
+          await ctx.api.editMessageText(ctx.chat!.id, messageId, html, { parse_mode: "HTML" });
+        } else {
+          const sent = await ctx.reply(html, { parse_mode: "HTML" });
+          messageId = sent.message_id;
+        }
+      } catch {
+        try {
+          const plain = truncateForTelegram(responseBuffer);
+          if (messageId) await ctx.api.editMessageText(ctx.chat!.id, messageId, plain);
+          else { const sent = await ctx.reply(plain); messageId = sent.message_id; }
+        } catch { /* ignore */ }
+      }
+    };
+
+    const typingInterval = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
+
+    const unsubscribe = piSessions.subscribe(userId, {
+      onTextDelta: (delta) => { responseBuffer += delta; },
+      onToolStart: async (toolName) => {
+        try {
+          if (progressMessageId) {
+            await ctx.api.editMessageText(ctx.chat!.id, progressMessageId, `⏳ ${toolName}...`);
+          } else {
+            const sent = await ctx.reply(`⏳ ${toolName}...`);
+            progressMessageId = sent.message_id;
+            progressMessages.push(sent.message_id);
+          }
+        } catch { /* ignore */ }
+      },
+      onToolEnd: () => {},
+      onAgentEnd: async () => {
+        clearInterval(typingInterval);
+        for (const id of progressMessages) {
+          try { await ctx.api.deleteMessage(ctx.chat!.id, id); } catch { /* ignore */ }
+        }
+        if (!flushed) { flushed = true; await flushResponse(); }
+      },
+    });
+
+    try {
+      await piSessions.prompt(userId, deployPrompt);
+      clearInterval(typingInterval);
+      for (const id of progressMessages) {
+        try { await ctx.api.deleteMessage(ctx.chat!.id, id); } catch { /* ignore */ }
+      }
+      if (!flushed) { flushed = true; await flushResponse(); }
+      if (!responseBuffer.trim()) await ctx.reply("✅ Deploy complete.");
+    } catch (e) {
+      clearInterval(typingInterval);
+      await ctx.reply(`❌ Deploy error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      unsubscribe();
+    }
   });
 
   // --- /confirm (trigger orchestrator pipeline after interview) ---
@@ -479,7 +566,7 @@ export function createBot(deps: BotDependencies): Bot {
     }
 
     const { piSessions } = deps;
-    piSessions.destroy(userId); // fresh session for new run
+    // Keep session if exists, only create if needed
     await piSessions.getOrCreate(userId);
 
     await ctx.reply(`🚀 Starting new site in <b>${active.name}</b>...`, { parse_mode: "HTML" });
