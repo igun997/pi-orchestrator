@@ -41,7 +41,7 @@ export const PageSpecSchema = z.object({
 });
 
 export const TaskStatusSchema = z.enum(["pending", "running", "complete", "failed", "skipped"]);
-export const PhaseSchema = z.enum(["idle", "extracting", "questioning", "confirming", "scaffolding", "building", "deploying", "done", "failed"]);
+export const PhaseSchema = z.enum(["idle", "interviewing", "extracting", "generating", "questioning", "confirming", "scaffolding", "building", "deploying", "done", "failed"]);
 
 export const TaskSchema = z.object({
   id: z.string(),

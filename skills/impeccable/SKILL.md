@@ -92,6 +92,10 @@ Before choosing, write one sentence of physical scene: who uses this, where, und
 - Don't animate CSS layout properties.
 - Ease out with exponential curves (ease-out-quart / quint / expo). No bounce, no elastic.
 
+**Supporting skills** (load when working on animation/motion):
+- [motion-design](../motion-design/SKILL.md) — LottieFiles motion design principles: 8-step checklist, emotion mapping, choreography, Disney principles adapted for UI. Use for animation strategy, timing/easing decisions, and multi-element sequencing.
+- [design-engineering](../design-engineering/SKILL.md) — Emil Kowalski's design engineering philosophy: animation decision framework, spring animations, component polish, CSS transform mastery, gesture interactions. Use for implementation-level animation craft and review.
+
 ### Absolute bans
 
 Match-and-refuse. If you're about to write any of these, rewrite the element with different structure.
