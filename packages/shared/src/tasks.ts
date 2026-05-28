@@ -2,7 +2,7 @@ import type { Task } from "./schemas.js";
 
 export function getReadyTasks(tasks: Task[]): Task[] {
   const complete = new Set(tasks.filter((task) => task.status === "complete" || task.status === "skipped").map((task) => task.id));
-  return tasks.filter((task) => task.status === "pending" && task.deps.every((dep) => complete.has(dep)));
+  return tasks.filter((task) => task.status === "pending" && task.deps.every((dep: string) => complete.has(dep)));
 }
 
 export function markTaskComplete(tasks: Task[], id: string): Task[] {
