@@ -102,7 +102,6 @@ export class SessionManager {
       if (event.type === "message_update") {
         const ame = e.assistantMessageEvent;
         if (ame) {
-          console.log(`[sub:${telegramId}] ame.type=${ame.type} delta=${(ame.delta ?? "").slice(0, 50)}`);
           if (ame.type === "text_delta" && ame.delta) {
             callbacks.onTextDelta(ame.delta);
           }
@@ -125,10 +124,7 @@ export class SessionManager {
    */
   async prompt(telegramId: number, text: string, images?: any[]): Promise<void> {
     const userSession = await this.getOrCreate(telegramId);
-    console.log(`[session:${telegramId}] prompt: "${text.slice(0, 50)}"`);
-    console.log(`[session:${telegramId}] model: ${userSession.session.agent?.state?.model?.name ?? "unknown"}`);
     await userSession.session.prompt(text, images ? { images } : undefined);
-    console.log(`[session:${telegramId}] prompt complete`);
   }
 
   /**
