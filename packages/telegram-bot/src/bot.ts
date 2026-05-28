@@ -6,12 +6,14 @@ import { AllowlistManager } from "./allowlist.js";
 import { CredentialStore } from "./credentials/store.js";
 import { verifyProvider, verifyCloudflare } from "./credentials/verify.js";
 import { WorkspaceManager } from "./session/workspace.js";
+import { SessionManager as PiSessionManager } from "./session/manager.js";
 import { buildPersona } from "./persona.js";
 
 export interface BotDependencies {
   config: BotConfig;
   allowlist: AllowlistManager;
   credentials: CredentialStore;
+  piSessions: PiSessionManager;
 }
 
 export function createBot(deps: BotDependencies): Bot {
@@ -427,9 +429,228 @@ export function createBot(deps: BotDependencies): Bot {
   bot.on("message:text", async (ctx) => {
     const userId = ctx.from!.id;
     const text = ctx.message.text;
+    const userName = ctx.from!.first_name ?? "User";
 
-    // TODO: route to pi session with orchestrator skills
-    await ctx.reply(`💬 Received: "${text}"\n\n⚠️ Pi session integration pending.`);
+    // Ensure workspace exists
+    const ws = new WorkspaceManager(config.dataDir, userId);
+    await ws.init();
+    const active = await ws.getActiveWorkspace();
+    if (!active) {
+      await ctx.reply("📂 No workspace yet. Create one first:\n/workspace new <name>");
+      return;
+    }
+
+    const { piSessions } = deps;
+
+    // Ensure session exists before subscribing
+    await piSessions.getOrCreate(userId);
+
+    // Stream response from pi session
+    let responseBuffer = "";
+    let messageId: number | undefined;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    const DEBOUNCE_MS = 1500;
+
+    // Typing indicator
+    const typingInterval = setInterval(() => {
+      ctx.replyWithChatAction("typing").catch(() => {});
+    }, 4000);
+    await ctx.replyWithChatAction("typing");
+
+    const flushResponse = async () => {
+      if (!responseBuffer.trim()) return;
+      const content = responseBuffer.slice(0, 4000);
+      try {
+        if (messageId) {
+          await ctx.api.editMessageText(ctx.chat!.id, messageId, content);
+        } else {
+          const sent = await ctx.reply(content);
+          messageId = sent.message_id;
+        }
+      } catch { /* edit race condition, ignore */ }
+    };
+
+    // Subscribe to streaming events
+    let flushed = false;
+    const unsubscribe = piSessions.subscribe(userId, {
+      onTextDelta: (delta) => {
+        responseBuffer += delta;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(flushResponse, DEBOUNCE_MS);
+      },
+      onToolStart: () => {},
+      onToolEnd: () => {},
+      onAgentEnd: () => {
+        clearInterval(typingInterval);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        if (!flushed) { flushed = true; flushResponse(); }
+      },
+    });
+
+    try {
+      // Include user name context in first message
+      const contextualPrompt = `[User: ${userName}] ${text}`;
+      await piSessions.prompt(userId, contextualPrompt);
+      // Final flush only if onAgentEnd didn't already
+      clearInterval(typingInterval);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (!flushed) { flushed = true; await flushResponse(); }
+      if (!responseBuffer.trim()) {
+        await ctx.reply("✅ Done.");
+      }
+    } catch (e) {
+      clearInterval(typingInterval);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      await ctx.reply(`❌ Error: ${errMsg}`);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  // --- Photo/Image messages ---
+  bot.on("message:photo", async (ctx) => {
+    const userId = ctx.from!.id;
+    const userName = ctx.from!.first_name ?? "User";
+    const caption = ctx.message.caption ?? "Please analyze this image.";
+
+    const ws = new WorkspaceManager(config.dataDir, userId);
+    await ws.init();
+    const active = await ws.getActiveWorkspace();
+    if (!active) {
+      await ctx.reply("📂 No workspace yet. Create one first:\n/workspace new <name>");
+      return;
+    }
+
+    const { piSessions } = deps;
+    await piSessions.getOrCreate(userId);
+
+    // Get highest resolution photo
+    const photos = ctx.message.photo;
+    const photo = photos[photos.length - 1]!;
+    const file = await ctx.api.getFile(photo.file_id);
+    const fileUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
+
+    // Download image
+    const response = await fetch(fileUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const base64 = buffer.toString("base64");
+    const mimeType = file.file_path?.endsWith(".png") ? "image/png" : "image/jpeg";
+
+    // Typing indicator
+    const typingInterval = setInterval(() => {
+      ctx.replyWithChatAction("typing").catch(() => {});
+    }, 4000);
+    await ctx.replyWithChatAction("typing");
+
+    let responseBuffer = "";
+    let messageId: number | undefined;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    const DEBOUNCE_MS = 1500;
+
+    const flushResponse = async () => {
+      if (!responseBuffer.trim()) return;
+      const content = responseBuffer.slice(0, 4000);
+      try {
+        if (messageId) {
+          await ctx.api.editMessageText(ctx.chat!.id, messageId, content);
+        } else {
+          const sent = await ctx.reply(content);
+          messageId = sent.message_id;
+        }
+      } catch { /* ignore */ }
+    };
+
+    const unsubscribe = piSessions.subscribe(userId, {
+      onTextDelta: (delta) => {
+        responseBuffer += delta;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(flushResponse, DEBOUNCE_MS);
+      },
+      onToolStart: () => {},
+      onToolEnd: () => {},
+      onAgentEnd: () => {
+        clearInterval(typingInterval);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        flushResponse();
+      },
+    });
+
+    try {
+      const contextualPrompt = `[User: ${userName}] ${caption}`;
+      await piSessions.prompt(userId, contextualPrompt, [{
+        type: "image",
+        source: { type: "base64", media_type: mimeType, data: base64 },
+      }]);
+      clearInterval(typingInterval);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      await flushResponse();
+      if (!responseBuffer.trim()) {
+        await ctx.reply("✅ Done.");
+      }
+    } catch (e) {
+      clearInterval(typingInterval);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      await ctx.reply(`❌ Error: ${errMsg}`);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  // --- Document/File messages ---
+  bot.on("message:document", async (ctx) => {
+    const userId = ctx.from!.id;
+    const caption = ctx.message.caption ?? "";
+    const doc = ctx.message.document;
+    const mimeType = doc.mime_type ?? "";
+
+    // Handle image documents
+    if (mimeType.startsWith("image/")) {
+      const file = await ctx.api.getFile(doc.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const base64 = buffer.toString("base64");
+
+      const { piSessions } = deps;
+      await piSessions.getOrCreate(userId);
+      await ctx.replyWithChatAction("typing");
+
+      let responseBuffer = "";
+      let messageId: number | undefined;
+
+      const unsubscribe = piSessions.subscribe(userId, {
+        onTextDelta: (delta) => { responseBuffer += delta; },
+        onToolStart: () => {},
+        onToolEnd: () => {},
+        onAgentEnd: async () => {
+          if (responseBuffer.trim()) {
+            if (messageId) {
+              await ctx.api.editMessageText(ctx.chat!.id, messageId, responseBuffer.slice(0, 4000)).catch(() => {});
+            } else {
+              await ctx.reply(responseBuffer.slice(0, 4000));
+            }
+          }
+        },
+      });
+
+      try {
+        const prompt = caption || "Analyze this image.";
+        await piSessions.prompt(userId, prompt, [{
+          type: "image",
+          source: { type: "base64", media_type: mimeType, data: base64 },
+        }]);
+        if (responseBuffer.trim() && !messageId) {
+          await ctx.reply(responseBuffer.slice(0, 4000));
+        }
+      } catch (e) {
+        await ctx.reply(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        unsubscribe();
+      }
+      return;
+    }
+
+    await ctx.reply(`📎 Received file: ${doc.file_name ?? "unknown"}\nFile handling for non-image types coming soon.`);
   });
 
   return bot;

@@ -13,9 +13,10 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.76.0",
+    "@grammyjs/auto-retry": "^2.0.2",
     "@orchestrator/shared": "workspace:*",
-    "grammy": "^1.35.0",
-    "@grammyjs/auto-retry": "^2.0.2"
+    "grammy": "^1.35.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

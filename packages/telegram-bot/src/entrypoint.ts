@@ -3,6 +3,7 @@
 import { loadConfig } from "./config.js";
 import { AllowlistManager } from "./allowlist.js";
 import { CredentialStore } from "./credentials/store.js";
+import { SessionManager as PiSessionManager } from "./session/manager.js";
 import { createBot } from "./bot.js";
 
 async function main(): Promise<void> {
@@ -20,8 +21,11 @@ async function main(): Promise<void> {
   // Init credential store
   const credentials = new CredentialStore(config.dataDir, config.telegramBotToken, config.telegramAdminId);
 
+  // Init pi session manager
+  const piSessions = new PiSessionManager(config);
+
   // Create and start bot
-  const bot = createBot({ config, allowlist, credentials });
+  const bot = createBot({ config, allowlist, credentials, piSessions });
 
   // Graceful shutdown
   const shutdown = () => {
